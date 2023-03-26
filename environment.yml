@@ -1,0 +1,16 @@
+name: seqmemenv
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.8
+  - numpy
+  - pytorch
+  - torchvision
+  - cudatoolkit
+  - matplotlib
+  - tqdm
+  - git
+  - seaborn
+  - scipy
+  - brewer2mpl
