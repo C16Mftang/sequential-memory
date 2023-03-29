@@ -129,6 +129,42 @@ class TemporalPC(nn.Module):
         self.obs_loss = torch.sum(err_x**2)
         energy = self.hidden_loss + self.obs_loss
         return energy
+    
+
+class SingleLayertPC(nn.Module):
+    def __init__(self, input_size, nonlin='tanh'):
+        super(SingleLayertPC, self).__init__()
+        self.Wr = nn.Linear(input_size, input_size, bias=False)
+        if nonlin == 'linear':
+            self.nonlin = Linear()
+        elif nonlin == 'tanh':
+            self.nonlin = Tanh()
+        else:
+            raise ValueError("no such nonlinearity!")
+        
+        self.input_size = input_size
+        
+    def init_hidden(self, bsz):
+        """Initializing sequence"""
+        return nn.init.kaiming_uniform_(torch.empty(bsz, self.input_size))
+    
+    def forward(self, prev):
+        pred = self.Wr(self.nonlin(prev))
+        return pred
+
+    def update_errs(self, curr, prev):
+        """
+        curr: current observation
+        prev: previous observation
+        """
+        pred = self.forward(prev)
+        err = curr - pred
+        return err
+    
+    def get_energy(self, curr, prev):
+        err = self.update_errs(curr, prev)
+        energy = torch.sum(err**2)
+        return energy
 
                 
 
