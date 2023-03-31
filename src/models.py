@@ -166,5 +166,100 @@ class SingleLayertPC(nn.Module):
         energy = torch.sum(err**2)
         return energy
 
+class LinearSingleLayertPC(nn.Module):
+    """
+    Linear version of the single layer tPC
+
+    Training is performed across the whole sequence,
+    rather than step-by-step
+    """
+    def __init__(self, input_size, learn_iters=100, lr=1e-2):
+        super(LinearSingleLayertPC, self).__init__()
+        self.Wr = nn.Linear(input_size, input_size, bias=False)
+        self.input_size = input_size
+        self.learn_iters = learn_iters
+        self.criterion = nn.MSELoss()
+        self.optimizer = torch.optim.SGD(list(self.Wr.parameters()), lr=lr)
+    
+    def forward(self, s):
+        pred = self.Wr(s)
+        return pred
+    
+    def recall(self, s):
+        pred = self.Wr(s)
+        return torch.sign(pred)
+    
+    def get_loss(self, X):
+        """X: shape PxN"""
+        pred = self.forward(X[:-1]) # (P-1)xN
+        loss = self.criterion(pred, X[1:])
+        return loss
+
+    def train(self, X):
+        losses = []
+        for i in range(self.learn_iters):
+            self.optimizer.zero_grad()
+            loss = self.get_loss(X)
+            loss.backward()
+            self.optimizer.step()
+            losses.append(loss.item())
+        return losses
+
+
+class AsymmetricHopfieldNetwork(nn.Module):
+    
+    def __init__(self, input_size):
+        super(AsymmetricHopfieldNetwork, self).__init__()
+        self.W = torch.zeros((input_size, input_size))
+        
+    def forward(self, X):
+        """
+        X: PxN matrix, where P is seq len, N the number of neurons
+        output: PxN matrix
+        """
+        output = torch.sign(torch.matmul(X, self.W.t()))
+        return output
+        
+    def train(self, X):
+        """
+        X: PxN matrix, where P is seq len, N the number of neurons
+
+        Asymmetric HN's weight is the auto-covariance matrix of patterns
+        """
+        P, N = X.shape
+        self.W = torch.matmul(X[1:].T, X[:-1]) / N
+
+class ModernAsymmetricHopfieldNetwork(nn.Module):
+    
+    def __init__(self, input_size, sep='linear'):
+        super(ModernAsymmetricHopfieldNetwork, self).__init__()
+        self.W = torch.zeros((input_size, input_size))
+        self.sep = sep
+        
+    def forward(self, X, s):
+        """
+        X: stored memories, shape PxN
+        s: query, shape (P-1)xN
+        output: (P-1)xN matrix
+        """
+        _, N = X.shape
+        if self.sep == 'exp':
+            score = torch.exp(torch.matmul(s, X[:-1].t()))
+        else:
+            score = torch.matmul(s, X[:-1].t()) ** int(self.sep)
+        output = torch.matmul(score, X[1:])
+        
+        return torch.sign(output / N)
+        
+    def train(self, X):
+        """
+        X: PxN matrix, where P is seq len, N the number of neurons
+
+        Asymmetric HN's weight is the auto-covariance matrix of patterns
+        """
+        P, N = X.shape
+        self.W = torch.matmul(X[1:].T, X[:-1]) / N
+
+        return -1
                 
 
