@@ -7,7 +7,7 @@ plt.style.use('ggplot')
 from src.utils import *
 from src.models import *
 
-result_path = os.path.join('./results/', 'asymmetric')
+result_path = os.path.join('./results/', 'pvn')
 if not os.path.exists(result_path):
     os.makedirs(result_path)
 
@@ -29,9 +29,9 @@ def generate_correlated_binary_patterns(P, N, b, seed=1):
             else:
                 X[i, j] = -template[j]
             
-            # revert the sign
-            if np.random.binomial(1, 0.5) == 1:
-                X[i, j] *= -1
+        # revert the sign
+        if np.random.binomial(1, 0.5) == 1:
+            X[i, j] *= -1
 
     return to_torch(X, device)
 
@@ -45,7 +45,11 @@ def search_Pmax(Ns, b, ubound_P, search_step, model='1'):
     K = 10 
     Pmaxs = []
 
-    # initial search range of Ps
+    """
+    initial search range of Ps
+    Note that the larger the P, the closer the mean of X (dim=0)
+    is to 0 and the closer X^TX is to the real covariance
+    """
     Ps = np.arange(prev_P, ubound_P+search_step, search_step)
 
     for N in Ns:
@@ -132,7 +136,7 @@ plt.plot(Ns, Pmaxs_pc, label='PC', marker='o')
 plt.plot(Ns, Pmaxs_1, label='HN (d=1)', marker='o', c='#13678A')
 plt.plot(Ns, Pmaxs_2, label='HN (d=2)', marker='o', c='#45C4B0')
 plt.yscale("log")
-plt.legend()
+plt.legend(prop={'size': 8})
 plt.title('Capacity of models')
 plt.xlabel(r'$N$')
 plt.ylabel(r'$P_{max}$')
