@@ -139,7 +139,7 @@ def search_Pmax(Ns, bs, start_P, ubound_P, search_step, model='1'):
 
 def main(args):
     Ns = [args.N]
-    bs = np.round(np.arange(0.9, 1., 0.1), 1)
+    bs = np.round(np.arange(0., 1., 0.1), 1)
 
     results = {}
     for i, model in enumerate(args.models):
