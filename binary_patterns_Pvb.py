@@ -138,7 +138,7 @@ def main(args):
     # Pmaxs_2 = search_Pmax(Ns, bs, start_P=start_P, search_step=5, ubound_P=700, model='2')
     # Pmaxs_3 = search_Pmax(Ns, b, search_step=10, ubound_P=5000, sep='3')
     print(results)
-    # json.dump(results, open(result_path + f"/Pmaxs_N{args.N}.json", 'w'))
+    json.dump(results, open(result_path + f"/Pmaxs_N{args.N}.json", 'w'))
 
 
 if __name__ == "__main__":
