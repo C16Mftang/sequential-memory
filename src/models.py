@@ -246,7 +246,7 @@ class ModernAsymmetricHopfieldNetwork(nn.Module):
         if self.sep == 'exp':
             score = torch.exp(torch.matmul(s, X[:-1].t()))
         elif self.sep == 'softmax':
-            score = F.softmax(torch.matmul(s, X[:-1].t()))
+            score = F.softmax(torch.matmul(s, X[:-1].t()), dim=0)
         else:
             score = torch.matmul(s, X[:-1].t()) ** int(self.sep)
         output = torch.matmul(score, X[1:])
