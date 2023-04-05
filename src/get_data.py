@@ -49,6 +49,32 @@ def generate_correlated_binary_patterns(P, N, b, device, seed=1):
             X[i, j] *= -1
 
     return to_torch(X, device)
+
+def load_sequence_mnist(seed, seq_len, binary=True):
+    # Set the random seed for reproducibility
+    torch.manual_seed(seed)
+
+    # Define the transform to convert the images to PyTorch tensors
+    transform = transforms.Compose([transforms.ToTensor()])
+
+    # Load the MNIST dataset
+    mnist = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+
+    # Initialize an empty tensor to store the sequence of digits
+    sequence = torch.zeros((seq_len, 28, 28))
+
+    # Loop through each digit class and randomly sample one image from each class
+    for i in range(seq_len):
+        indices = torch.where(mnist.targets == i)[0]
+        idx = torch.randint(0, indices.size()[0], (1,))
+        img, _ = mnist[indices[idx][0]]
+        sequence[i] = img.squeeze()
+
+    if binary:
+        sequence[sequence > 0.5] = 1
+        sequence[sequence <= 0.5] = -1
+
+    return sequence
     
 
 def get_seq_mnist(datapath, seq_len, sample_size, batch_size, seed, device):
