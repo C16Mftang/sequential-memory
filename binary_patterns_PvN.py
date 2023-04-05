@@ -70,13 +70,13 @@ def search_Pmax(Ns, b, start_P, ubound_P, search_step, tol, model='1'):
                     # train PC
                     net = LinearSingleLayertPC(N, learn_iters, lr)
                     losses = net.train(X)
-                    recall = net.recall(X[:-1])
+                    recall = torch.sign(net.recall(X[:-1]))
                     curr_losses.append(losses)
                 else:
                     # train HNs
                     net = ModernAsymmetricHopfieldNetwork(N, model)
                     net.train(X)
-                    recall = net(X, X[:-1]) # shape (P-1)xN
+                    recall = torch.sign(net(X, X[:-1])) # shape (P-1)xN
                 
                 # groundtruth
                 gt = X[1:]

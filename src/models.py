@@ -187,7 +187,7 @@ class LinearSingleLayertPC(nn.Module):
     
     def recall(self, s):
         pred = self.Wr(s)
-        return torch.sign(pred)
+        return pred
     
     def get_loss(self, X):
         """X: shape PxN"""
@@ -245,11 +245,13 @@ class ModernAsymmetricHopfieldNetwork(nn.Module):
         _, N = X.shape
         if self.sep == 'exp':
             score = torch.exp(torch.matmul(s, X[:-1].t()))
+        elif self.sep == 'softmax':
+            score = F.softmax(torch.matmul(s, X[:-1].t()))
         else:
             score = torch.matmul(s, X[:-1].t()) ** int(self.sep)
         output = torch.matmul(score, X[1:])
         
-        return torch.sign(output / N)
+        return output / N
         
     def train(self, X):
         """
