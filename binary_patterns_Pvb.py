@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 from src.utils import *
 from src.models import *
+from src.get_data import generate_correlated_binary_patterns
 
 result_path = os.path.join('./results/', 'pvb')
 if not os.path.exists(result_path):
@@ -31,25 +32,6 @@ parser.add_argument('--search-step', type=int, default=[1, 1, 2], nargs='+',
 parser.add_argument('--models', type=str, default=['PC', '1', '2'], nargs='+',
                     help='model names')
 args = parser.parse_args()
-
-
-def generate_correlated_binary_patterns(P, N, b, seed=1):
-    np.random.seed(seed)
-    X = np.zeros((int(P), int(N)))
-    template = np.random.choice([-1, 1], size=N)
-    prob = (1 + b) / 2
-    for i in range(P):
-        for j in range(N):
-            if np.random.binomial(1, prob) == 1:
-                X[i, j] = template[j]
-            else:
-                X[i, j] = -template[j]
-            
-        # revert the sign
-        if np.random.binomial(1, 0.5) == 1:
-            X[i, j] *= -1
-
-    return to_torch(X, device)
 
 learn_iters = 800
 lr = 5e-1
@@ -81,7 +63,7 @@ def search_Pmax(Ns, bs, start_P, ubound_P, search_step, model='1'):
                 curr_losses = [] # K x learn_iters
                 for k in range(K):
                     # generate data, couple seed with k
-                    X = generate_correlated_binary_patterns(P, N, b, seed=k)
+                    X = generate_correlated_binary_patterns(P, N, b, device=device, seed=k)
                     X = X.to(torch.float)
 
                     if model == 'PC':
@@ -156,7 +138,7 @@ def main(args):
     # Pmaxs_2 = search_Pmax(Ns, bs, start_P=start_P, search_step=5, ubound_P=700, model='2')
     # Pmaxs_3 = search_Pmax(Ns, b, search_step=10, ubound_P=5000, sep='3')
     print(results)
-    json.dump(results, open(result_path + f"/Pmaxs_N{args.N}.json", 'w'))
+    # json.dump(results, open(result_path + f"/Pmaxs_N{args.N}.json", 'w'))
 
 
 if __name__ == "__main__":

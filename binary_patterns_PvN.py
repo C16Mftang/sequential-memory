@@ -2,10 +2,13 @@ import torch
 import torch.nn as nn
 import numpy as np
 import os
+import json
+import argparse
 import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 from src.utils import *
 from src.models import *
+from src.get_data import generate_correlated_binary_patterns
 
 result_path = os.path.join('./results/', 'pvn')
 if not os.path.exists(result_path):
@@ -17,29 +20,24 @@ if not os.path.exists(temp_path):
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-def generate_correlated_binary_patterns(P, N, b, seed=1):
-    np.random.seed(seed)
-    X = np.zeros((int(P), int(N)))
-    template = np.random.choice([-1, 1], size=N)
-    prob = (1 + b) / 2
-    for i in range(P):
-        for j in range(N):
-            if np.random.binomial(1, prob) == 1:
-                X[i, j] = template[j]
-            else:
-                X[i, j] = -template[j]
-            
-        # revert the sign
-        if np.random.binomial(1, 0.5) == 1:
-            X[i, j] *= -1
+parser = argparse.ArgumentParser(description='binary patterns')
+parser.add_argument('--tol', type=float, default=0.01,
+                    help='tolerance when determining Pmax')
+parser.add_argument('--start-P', type=int, default=[2, 2, 2], nargs='+',
+                    help='start of the number of patterns for search')
+parser.add_argument('--ubound-P', type=int, default=[100, 100, 1000], nargs='+',
+                    help='end of the number of patterns for search')
+parser.add_argument('--search-step', type=int, default=[1, 1, 5], nargs='+',
+                    help='search step of the number of patterns for search')
+parser.add_argument('--models', type=str, default=['PC', '1', '2'], nargs='+',
+                    help='model names')
+args = parser.parse_args()
 
-    return to_torch(X, device)
 
 learn_iters = 800
 lr = 5e-1
 
-def search_Pmax(Ns, b, ubound_P, search_step, model='1'):
-    prev_P = 2
+def search_Pmax(Ns, b, start_P, ubound_P, search_step, tol, model='1'):
     
     # number of sweeps for each N and each P to reduce randomness
     K = 10 
@@ -50,7 +48,7 @@ def search_Pmax(Ns, b, ubound_P, search_step, model='1'):
     Note that the larger the P, the closer the mean of X (dim=0)
     is to 0 and the closer X^TX is to the real covariance
     """
-    Ps = np.arange(prev_P, ubound_P+search_step, search_step)
+    Ps = np.arange(start_P, ubound_P+search_step, search_step)
 
     for N in Ns:
         print('==========================')
@@ -65,7 +63,7 @@ def search_Pmax(Ns, b, ubound_P, search_step, model='1'):
             curr_losses = [] # K x learn_iters
             for k in range(K):
                 # generate data, couple seed with k
-                X = generate_correlated_binary_patterns(P, N, b, seed=k)
+                X = generate_correlated_binary_patterns(P, N, b, device=device, seed=k)
                 X = X.to(torch.float)
 
                 if model == 'PC':
@@ -98,7 +96,7 @@ def search_Pmax(Ns, b, ubound_P, search_step, model='1'):
             print(f'Current P:{P}, error prob:{error_prob}')
 
             # once prob of error exceeds 0.01 we assign the previous P as Pmax
-            if error_prob >= 0.01:
+            if error_prob >= tol:
                 Pmax = Ps[P_ind - 1]
 
                 # stop increasing the value of P
@@ -113,7 +111,7 @@ def search_Pmax(Ns, b, ubound_P, search_step, model='1'):
         Ps = np.arange(Pmax, ubound_P, search_step)
 
         # collect Pmax
-        Pmaxs.append(Pmax)
+        Pmaxs.append(int(Pmax))
 
         # save fig
         # plt.legend()
@@ -121,28 +119,46 @@ def search_Pmax(Ns, b, ubound_P, search_step, model='1'):
     
     return Pmaxs
 
+def main(args):
+    Ns = np.arange(10, 110, 10)
+    b = 0
 
-Ns = np.arange(10, 110, 10)
-b = 0
+    results = {}
+    for i, model in enumerate(args.models):
+        Pmaxs = search_Pmax(Ns, 
+                            b, 
+                            start_P=args.start_P[i], 
+                            search_step=args.search_step[i], 
+                            ubound_P=args.ubound_P[i], 
+                            tol = args.tol,
+                            model=args.models[i])
+        results[args.models[i]] = Pmaxs
 
-Pmaxs_pc = search_Pmax(Ns, b, search_step=1, ubound_P=100, model='PC')
-Pmaxs_1 = search_Pmax(Ns, b, search_step=1, ubound_P=100, model='1')
-Pmaxs_2 = search_Pmax(Ns, b, search_step=5, ubound_P=1000, model='2')
-# Pmaxs_3 = search_Pmax(Ns, b, search_step=10, ubound_P=5000, sep='3')
 
-plt.figure(figsize=(4, 3))
-plt.plot(Ns, Ns, label='Identity', c='k', ls='--', marker='o')
-plt.plot(Ns, Pmaxs_pc, label='PC', marker='o')
-plt.plot(Ns, Pmaxs_1, label='HN (d=1)', marker='o', c='#13678A')
-plt.plot(Ns, Pmaxs_2, label='HN (d=2)', marker='o', c='#45C4B0')
-plt.yscale("log")
-plt.legend(prop={'size': 8})
-plt.title('Capacity of models')
-plt.xlabel(r'$N$')
-plt.ylabel(r'$P_{max}$')
-plt.xticks(Ns, Ns)
-plt.tight_layout()
-plt.savefig(result_path + f'/Capacity', dpi=200)
+    # Pmaxs_pc = search_Pmax(Ns, b, search_step=1, ubound_P=100, tol=tol, model='PC')
+    # Pmaxs_1 = search_Pmax(Ns, b, search_step=1, ubound_P=100, tol=tol, model='1')
+    # Pmaxs_2 = search_Pmax(Ns, b, search_step=5, ubound_P=1000, tol=tol, model='2')
+    # Pmaxs_3 = search_Pmax(Ns, b, search_step=10, ubound_P=5000, sep='3')
+
+    print(results)
+    json.dump(results, open(result_path + f"/Pmaxs_tol{args.tol}.json", 'w'))
+
+if __name__ == "__main__":
+    main(args)
+
+# plt.figure(figsize=(4, 3))
+# # plt.plot(Ns, Ns, label='Identity', c='k', ls='--', marker='o')
+# plt.plot(Ns, Pmaxs_pc, label='PC', marker='o')
+# plt.plot(Ns, Pmaxs_1, label='HN (d=1)', marker='o', c='#13678A')
+# # plt.plot(Ns, Pmaxs_2, label='HN (d=2)', marker='o', c='#45C4B0')
+# plt.yscale("log")
+# plt.legend(prop={'size': 8})
+# plt.title(r'Model capacity with different $N$\'s')
+# plt.xlabel(r'$N$')
+# plt.ylabel(r'$P_{max}$')
+# plt.xticks(Ns, Ns)
+# plt.tight_layout()
+# plt.savefig(result_path + f'/Capacity_long.pdf')
 
 
 

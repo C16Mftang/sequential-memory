@@ -9,6 +9,8 @@ import random
 import numpy as np
 import math
 
+from src.utils import *
+
 class DataWrapper(Dataset):
     """
     Class to wrap a dataset. Assumes X and y are already
@@ -29,6 +31,24 @@ class DataWrapper(Dataset):
     
     def __getitem__(self, idx):
         return self.features[idx], []
+    
+def generate_correlated_binary_patterns(P, N, b, device, seed=1):
+    np.random.seed(seed)
+    X = np.zeros((int(P), int(N)))
+    template = np.random.choice([-1, 1], size=N)
+    prob = (1 + b) / 2
+    for i in range(P):
+        for j in range(N):
+            if np.random.binomial(1, prob) == 1:
+                X[i, j] = template[j]
+            else:
+                X[i, j] = -template[j]
+            
+        # revert the sign
+        if np.random.binomial(1, 0.5) == 1:
+            X[i, j] *= -1
+
+    return to_torch(X, device)
     
 
 def get_seq_mnist(datapath, seq_len, sample_size, batch_size, seed, device):
