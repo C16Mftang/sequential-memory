@@ -252,7 +252,7 @@ class ModernAsymmetricHopfieldNetwork(nn.Module):
             score = torch.matmul(s, X[:-1].t()) ** int(self.sep)
         output = torch.matmul(score, X[1:])
         
-        return output / N
+        return output
         
     def train(self, X):
         """
