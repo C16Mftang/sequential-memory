@@ -50,7 +50,7 @@ def generate_correlated_binary_patterns(P, N, b, device, seed=1):
 
     return to_torch(X, device)
 
-def load_sequence_mnist(seed, seq_len, binary=True):
+def load_sequence_mnist(seed, seq_len, order=True, binary=True):
     # Set the random seed for reproducibility
     torch.manual_seed(seed)
 
@@ -63,12 +63,20 @@ def load_sequence_mnist(seed, seq_len, binary=True):
     # Initialize an empty tensor to store the sequence of digits
     sequence = torch.zeros((seq_len, 28, 28))
 
-    # Loop through each digit class and randomly sample one image from each class
-    for i in range(seq_len):
-        indices = torch.where(mnist.targets == i)[0]
-        idx = torch.randint(0, indices.size()[0], (1,))
-        img, _ = mnist[indices[idx][0]]
-        sequence[i] = img.squeeze()
+    if order:
+        # Loop through each digit class and randomly sample one image from each class
+        for i in range(seq_len):
+            indices = torch.where(mnist.targets == i)[0]
+            idx = torch.randint(0, indices.size()[0], (1,))
+            img, _ = mnist[indices[idx][0]]
+            sequence[i] = img.squeeze()
+
+    else:
+        # Sample `seq_len` random images from the MNIST dataset
+        indices = torch.randint(0, len(mnist), (seq_len,))
+        for i, idx in enumerate(indices):
+            img, _ = mnist[idx]
+            sequence[i] = img.squeeze()
 
     if binary:
         sequence[sequence > 0.5] = 1
