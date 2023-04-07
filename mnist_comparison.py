@@ -76,7 +76,7 @@ def train_PC(pc, optimizer, seq, learn_iters, device):
     print(f'training PC complete, time: {time.time() - start_time}')
     return losses
 
-def _pc_recall(model, seq, query_type, binary):
+def _pc_recall(model, seq, query_type, binary, device):
     """recall function for pc
     
     seq: PxN sequence
@@ -86,7 +86,7 @@ def _pc_recall(model, seq, query_type, binary):
     output: (P-1)xN recall of sequence (starting from the second step)
     """
     seq_len, N = seq.shape
-    recall = torch.zeros((seq_len, N))
+    recall = torch.zeros((seq_len, N)).to(device)
     recall[0] = seq[0].clone().detach()
     if query_type == 'online':
         # recall using true image at each step
@@ -99,7 +99,7 @@ def _pc_recall(model, seq, query_type, binary):
 
     return recall
     
-def _hn_recall(model, seq, query_type, binary):
+def _hn_recall(model, seq, query_type, binary, device):
     """recall function for pc
     
     seq: PxN sequence
@@ -109,7 +109,7 @@ def _hn_recall(model, seq, query_type, binary):
     output: (P-1)xN recall of sequence (starting from the second step)
     """
     seq_len, N = seq.shape
-    recall = torch.zeros((seq_len, N))
+    recall = torch.zeros((seq_len, N)).to(device)
     recall[0] = seq[0].clone().detach()
     if query_type == 'online':
         # recall using true image at each step
@@ -174,8 +174,8 @@ def main(args):
     PC_losses = train_PC(pc, optimizer, seq, learn_iters, device)
     
     with torch.no_grad():
-        PC_recall = _pc_recall(pc, seq, query_type, binary)
-    HN_recall = _hn_recall(hn, seq, query_type, binary)
+        PC_recall = _pc_recall(pc, seq, query_type, binary, device)
+        HN_recall = _hn_recall(hn, seq, query_type, binary, device)
 
     _plot_recalls(PC_recall, 'PC', args)
     HN_name = f'HN{sep}beta{beta}' if sep == 'softmax' else f'HN{sep}'
