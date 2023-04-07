@@ -231,10 +231,11 @@ class AsymmetricHopfieldNetwork(nn.Module):
 
 class ModernAsymmetricHopfieldNetwork(nn.Module):
     
-    def __init__(self, input_size, sep='linear'):
+    def __init__(self, input_size, sep='linear', beta=1):
         super(ModernAsymmetricHopfieldNetwork, self).__init__()
         self.W = torch.zeros((input_size, input_size))
         self.sep = sep
+        self.beta = beta
         
     def forward(self, X, s):
         """
@@ -246,7 +247,7 @@ class ModernAsymmetricHopfieldNetwork(nn.Module):
         if self.sep == 'exp':
             score = torch.exp(torch.matmul(s, X[:-1].t()))
         elif self.sep == 'softmax':
-            score = F.softmax(torch.matmul(s, X[:-1].t()), dim=0)
+            score = F.softmax(self.beta * torch.matmul(s, X[:-1].t()), dim=0)
         else:
             score = torch.matmul(s, X[:-1].t()) ** int(self.sep)
         output = torch.matmul(score, X[1:])
