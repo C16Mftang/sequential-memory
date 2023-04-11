@@ -1,13 +1,12 @@
 """
 This code compares the performance of tPC, AHN (with different separation function)
-on a single MNIST sequence of 0-9
+on a random MNIST sequence of length seq_len
 """
 
 import os
 import argparse
 import json
 import time
-from skimage.metrics import structural_similarity as ssim
 import torch
 import torch.nn as nn
 import numpy as np
@@ -18,36 +17,43 @@ from src.models import *
 from src.utils import *
 from src.get_data import *
 
-result_path = os.path.join('./results/', 'mnist_sequence')
+path = 'mnist_sequence'
+result_path = os.path.join('./results/', path)
 if not os.path.exists(result_path):
     os.makedirs(result_path)
 
-num_path = os.path.join('./results/', 'mnist_sequence', 'numerical')
+num_path = os.path.join('./results/', path, 'numerical')
 if not os.path.exists(num_path):
     os.makedirs(num_path)
 
-fig_path = os.path.join('./results/', 'mnist_sequence', 'fig')
+fig_path = os.path.join('./results/', path, 'fig')
 if not os.path.exists(fig_path):
     os.makedirs(fig_path)
 
+model_path = os.path.join('./results/', path, 'models')
+if not os.path.exists(model_path):
+    os.makedirs(model_path)
+
 # add parser as varaible of the main class
 parser = argparse.ArgumentParser(description='Sequential memories')
-parser.add_argument('--seq-len', type=int, default=10, 
-                    help='length of input for training (default: 10)')
+parser.add_argument('--seq-len-pow', type=int, default=10, 
+                    help='max input length')
+parser.add_argument('--seed', type=int, default=[1], nargs='+',
+                    help='seed for model init (default: 1); can be multiple, separated by space')
+parser.add_argument('--lr', type=float, default=1e-4,
+                    help='learning rate for PC')
 parser.add_argument('--epochs', type=int, default=200,
-                    help='number of epochs to train (default: 100)')
-parser.add_argument('--seed', type=int, default=1,
-                    help='seed for model init (default: 1)')
-parser.add_argument('--lr', type=float, default=2e-4,
-                    help='seed for model init (default: 1)')
+                    help='number of epochs to train (default: 200)')
 parser.add_argument('--HN-type', type=str, default='softmax',
-                    help='type of MAHN')
+                    help='type of MAHN default to softmax')
 parser.add_argument('--data-type', type=str, default='continuous', choices=['binary', 'continuous'],
                     help='type of data; note that when HN type is exp or softmax, \
                         this should be always continuous')
 parser.add_argument('--query', type=str, default='online', choices=['online', 'offline'],
                     help='how you query the recall; online means query with true memory at each time, \
                         offline means query with the predictions')
+parser.add_argument('--mode', type=str, default='train', choices=['train', 'recall'],
+                    help='mode of the script: train or recall (just to save time)')
 parser.add_argument('--beta', type=int, default=1,
                     help='beta value for the MCHN')
 args = parser.parse_args()
@@ -72,11 +78,13 @@ def train_PC(pc, optimizer, seq, learn_iters, device):
             # add up the loss value at each time step
             epoch_loss += energy.item() / seq_len
         losses.append(epoch_loss)
+        if (learn_iter + 1) % 10 == 0:
+            print(f'Epoch {learn_iter+1}, loss {epoch_loss}')
 
     print(f'training PC complete, time: {time.time() - start_time}')
     return losses
 
-def _pc_recall(model, seq, query_type, binary, device):
+def _pc_recall(model, seq, query_type, device, binary=False):
     """recall function for pc
     
     seq: PxN sequence
@@ -95,11 +103,11 @@ def _pc_recall(model, seq, query_type, binary, device):
         # recall using predictions from previous step
         prev = seq[0].clone().detach() # 1xN
         for k in range(1, seq_len):
-            recall[k] = torch.sign(model(recall[k-1])) if binary else model(recall[k-1]) # 1xN
+            recall[k] = torch.sign(model(recall[k-1:k])) if binary else model(recall[k-1:k]) # 1xN
 
     return recall
     
-def _hn_recall(model, seq, query_type, binary, device):
+def _hn_recall(model, seq, query_type, device, binary=False):
     """recall function for pc
     
     seq: PxN sequence
@@ -119,7 +127,7 @@ def _hn_recall(model, seq, query_type, binary, device):
         prev = seq[0].clone().detach() # 1xN
         for k in range(1, seq_len):
             # prev = torch.sign(model(seq, prev)) if binary else model(seq, prev) # 1xN
-            recall[k] = torch.sign(model(seq, recall[k-1])) if binary else model(seq, recall[k-1]) # 1xN
+            recall[k] = torch.sign(model(seq, recall[k-1:k])) if binary else model(seq, recall[k-1:k]) # 1xN
 
     return recall
 
@@ -129,7 +137,7 @@ def _plot_recalls(recall, model_name, args):
     for j in range(seq_len):
         ax[j].imshow(to_np(recall[j].reshape(28, 28)), cmap='gray_r')
         ax[j].axis('off')
-    plt.savefig(fig_path + f'/{model_name}_len{args.seq_len}_query{args.query}_data{args.data_type}', dpi=150)
+    plt.savefig(fig_path + f'/{model_name}_len{seq_len}_query{args.query}_data{args.data_type}', dpi=150)
 
 def _plot_memory(x, seed):
     seq_len = x.shape[0]
@@ -139,66 +147,96 @@ def _plot_memory(x, seed):
         ax[j].axis('off')
     plt.savefig(fig_path + f'/memory_len{seq_len}_seed{seed}', dpi=150)
 
+def _plot_PC_loss(loss, seq_len, learn_iters):
+    # plotting loss for tunning; temporary
+    plt.figure()
+    plt.plot(loss, label='squared error sum')
+    plt.legend()
+    plt.savefig(fig_path + f'/losses_len{seq_len}_iters{learn_iters}')
+
 def main(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(device)
 
     # variables for data
     w = 28
+    input_size = 1 * (w ** 2)
 
     # command line inputs
-    seq_len = args.seq_len
     seed = args.seed
     learn_iters = args.epochs
     learn_lr = args.lr
     sep = args.HN_type
-    beta = args.beta
+    seq_len_pow = args.seq_len_pow
     query_type = args.query
+    mode = args.mode
+    beta = args.beta
     binary = True if args.data_type == 'binary' else False
 
-    print(f'Training variables: seq_len:{seq_len}')
+    # loop through different seq_len
+    PC_MSEs = []
+    HN_MSEs = []
+    for pow in np.arange(1, seq_len_pow):
 
-    # load data
-    seq = load_sequence_mnist(seed, seq_len, binary=binary).to(device)
-    seq = seq.reshape((seq_len, w ** 2)) # seq_lenx784
+        seq_len = 2 ** pow
+        if seq_len == 128:
+            learn_iters += 100
+        if seq_len == 256:
+            learn_iters += 100
 
-    # temporal PC
-    pc = SingleLayertPC(input_size=w ** 2, nonlin='linear').to(device)
-    optimizer = torch.optim.Adam(pc.parameters(), lr=learn_lr)
-    
-    # HN with separation function
-    hn = ModernAsymmetricHopfieldNetwork(w ** 2, sep=sep, beta=beta).to(device)
+        print(f'Training variables: seq_len:{seq_len}; seed:{seed}')
 
-    # training PC
-    # note that there is no need to train MAHN - we can just write down the retrieval
-    PC_losses = train_PC(pc, optimizer, seq, learn_iters, device)
-    
-    with torch.no_grad():
-        PC_recall = _pc_recall(pc, seq, query_type, binary, device)
-        HN_recall = _hn_recall(hn, seq, query_type, binary, device)
+        # load data
+        seq = load_sequence_mnist(seed, seq_len, order=False, binary=binary).to(device)
+        seq = seq.reshape((seq_len, input_size)) # seq_lenx784
 
-    _plot_recalls(PC_recall, 'PC', args)
-    HN_name = f'HN{sep}beta{beta}' if sep == 'softmax' else f'HN{sep}'
-    _plot_recalls(HN_recall, HN_name, args)
+        # temporal PC
+        pc = SingleLayertPC(input_size=input_size, nonlin='linear').to(device)
+        optimizer = torch.optim.Adam(pc.parameters(), lr=learn_lr)
 
-    gt = seq[1:]
-    # HN_mse = torch.mean((seq - HN_recall) ** 2)
-    # PC_mse = torch.mean((seq - PC_recall) ** 2)
-    HN_ssim = ssim(to_np(seq[-1]), to_np(HN_recall[-1]))
-    PC_ssim = ssim(to_np(seq[-1]), to_np(PC_recall[-1]))
+        # HN with linear separation function
+        hn = ModernAsymmetricHopfieldNetwork(input_size, sep=sep, beta=beta).to(device)
 
-    # print((seq - HN_recall)[1])
-    # print((seq - PC_recall)[1])
+        PATH = os.path.join(model_path, f'PC_len{seq_len}_seed{seed}.pt')
+        if mode == 'train':
+            # training PC
+            # note that there is no need to train MAHN - we can just write down the retrieval
+            PC_losses = train_PC(pc, optimizer, seq, learn_iters, device)
+            # save the PC model for later recall - because training PC is exhausting
+            torch.save(pc.state_dict(), PATH)
+            _plot_PC_loss(PC_losses, seq_len, learn_iters)
 
-    print(PC_ssim, HN_ssim)
-    # print(PC_mse, HN_mse)
+        else:
+            # recall mode, no training need, fast
+            pc.load_state_dict(torch.load(PATH))
+            pc.eval()
 
-    # plt.figure()
-    # plt.plot(PC_losses, label='squared error sum')
-    # plt.legend()
-    # plt.savefig(result_path + f'/losses_len{seq_len}_iters{learn_iters}')
+            with torch.no_grad():
+                PC_recall = _pc_recall(pc, seq, query_type, device)
+                HN_recall = _hn_recall(hn, seq, query_type, device)
 
-    _plot_memory(seq, seed)
+            if seq_len <= 16:
+                _plot_recalls(PC_recall, 'PC', args)
+                HN_name = f'HN{sep}beta{beta}' if sep == 'softmax' else f'HN{sep}'
+                _plot_recalls(HN_recall, HN_name, args)
+
+                # plot the original memories
+                _plot_memory(seq, seed)
+
+            # calculate MSE at each one, save file name with seed
+            PC_MSEs.append(float(to_np(torch.mean((seq - PC_recall) ** 2))))
+            HN_MSEs.append(float(to_np(torch.mean((seq - HN_recall) ** 2))))
+
+    # save everything at this particular seed
+    if mode == 'recall':
+        results = {}
+        results["PC"] = PC_MSEs
+        results["HN"] = HN_MSEs
+        print(results)
+        json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{query_type}.json", 'w'))
+
 
 if __name__ == "__main__":
-    main(args)
+    for s in args.seed:
+        args.seed = s
+        main(args)
