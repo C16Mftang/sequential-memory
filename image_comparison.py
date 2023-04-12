@@ -36,9 +36,9 @@ if not os.path.exists(model_path):
 
 # add parser as varaible of the main class
 parser = argparse.ArgumentParser(description='Sequential memories')
-parser.add_argument('--max-seq-len', type=int, default=112, 
+parser.add_argument('--max-seq-len', type=int, default=10, 
                     help='max input length')
-parser.add_argument('--seq-len-step', type=int, default=10, 
+parser.add_argument('--seq-len-step', type=int, default=1, 
                     help='seq len increase rate')
 parser.add_argument('--seed', type=int, default=[1], nargs='+',
                     help='seed for model init (default: 1); can be multiple, separated by space')
@@ -102,7 +102,7 @@ def _pc_recall(model, seq, query_type, device, binary=False):
         # recall using predictions from previous step
         prev = seq[0].clone().detach() # 1xN
         for k in range(1, seq_len):
-            recall[k] = torch.sign(model(recall[k-1])) if binary else model(recall[k-1]) # 1xN
+            recall[k] = torch.sign(model(recall[k-1:k])) if binary else model(recall[k-1:k]) # 1xN
 
     return recall
     
@@ -126,7 +126,7 @@ def _hn_recall(model, seq, query_type, device, binary=False):
         prev = seq[0].clone().detach() # 1xN
         for k in range(1, seq_len):
             # prev = torch.sign(model(seq, prev)) if binary else model(seq, prev) # 1xN
-            recall[k] = torch.sign(model(seq, recall[k-1])) if binary else model(seq, recall[k-1]) # 1xN
+            recall[k] = torch.sign(model(seq, recall[k-1:k])) if binary else model(seq, recall[k-1:k]) # 1xN
 
     return recall
 
@@ -136,6 +136,7 @@ def _plot_recalls(recall, model_name, seq_len, args):
     for j in range(seq_len):
         ax[j].imshow(to_np(recall[j].reshape((3, 32, 32)).permute(1, 2, 0)))
         ax[j].axis('off')
+    plt.tight_layout()
     plt.savefig(fig_path + f'/{model_name}_len{seq_len}_query{args.query}')
 
 def _plot_memory(x, seed):
@@ -144,6 +145,7 @@ def _plot_memory(x, seed):
     for j in range(seq_len):
         ax[j].imshow(to_np(x[j].reshape((3, 32, 32)).permute(1, 2, 0)))
         ax[j].axis('off')
+    plt.tight_layout()
     plt.savefig(fig_path + f'/memory_len{seq_len}_seed{seed}')
 
 def _plot_PC_loss(loss, seq_len, learn_iters):
@@ -175,7 +177,7 @@ def main(args):
     # loop through different seq_len
     PC_MSEs = []
     HN_MSEs = []
-    for seq_len in np.arange(2, max_seq_len, 1):
+    for seq_len in np.arange(2, max_seq_len, seq_len_step):
 
         # if seq_len == 64:
         #     learn_iters += 100
@@ -206,7 +208,7 @@ def main(args):
 
         else:
             # recall mode, no training need, fast
-            pc.load_state_dict(torch.load(PATH))
+            pc.load_state_dict(torch.load(PATH, map_location=torch.device(device)))
             pc.eval()
 
             with torch.no_grad():
