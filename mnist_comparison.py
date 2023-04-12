@@ -7,6 +7,7 @@ import os
 import argparse
 import json
 import time
+from skimage.metrics import structural_similarity as ssim
 import torch
 import torch.nn as nn
 import numpy as np
@@ -36,7 +37,7 @@ if not os.path.exists(model_path):
 
 # add parser as varaible of the main class
 parser = argparse.ArgumentParser(description='Sequential memories')
-parser.add_argument('--seq-len-max', type=int, default=10, 
+parser.add_argument('--seq-len-max', type=int, default=11, 
                     help='max input length')
 parser.add_argument('--seed', type=int, default=[1], nargs='+',
                     help='seed for model init (default: 1); can be multiple, separated by space')
@@ -139,6 +140,7 @@ def _plot_recalls(recall, model_name, args):
     for j in range(seq_len):
         ax[j].imshow(to_np(recall[j].reshape(28, 28)), cmap='gray_r')
         ax[j].axis('off')
+    plt.tight_layout()
     plt.savefig(fig_path + f'/{model_name}_len{seq_len}_query{args.query}_data{args.data_type}', dpi=150)
 
 def _plot_memory(x, seed, args):
@@ -147,6 +149,7 @@ def _plot_memory(x, seed, args):
     for j in range(seq_len):
         ax[j].imshow(to_np(x[j].reshape(28, 28)), cmap='gray_r')
         ax[j].axis('off')
+    plt.tight_layout()
     plt.savefig(fig_path + f'/memory_len{seq_len}_seed{seed}_data{args.data_type}', dpi=150)
 
 def _plot_PC_loss(loss, seq_len, learn_iters, data_type='continuous'):
@@ -180,12 +183,18 @@ def main(args):
     PC_MSEs = []
     HN_MSEs = []
 
-    seq_lens = [2 ** pow for pow in range(1, seq_len_max)] if not order else range(2, seq_len_max)
+    PC_SSIMs, HN_SSIMs = [], []
+
+    seq_lens = [2 ** pow for pow in range(1, seq_len_max)] if not order else [2, 3, 5, 10]
     for seq_len in seq_lens:
         if seq_len == 128:
             learn_iters += 100
         if seq_len == 256:
-            learn_iters += 100
+            learn_iters += 200
+        if seq_len == 256:
+            learn_iters += 200
+        if seq_len == 1024:
+            learn_iters += 200
 
         print(f'Training variables: seq_len:{seq_len}; seed:{seed}')
 
@@ -211,7 +220,7 @@ def main(args):
 
         else:
             # recall mode, no training need, fast
-            pc.load_state_dict(torch.load(PATH))
+            pc.load_state_dict(torch.load(PATH, map_location=torch.device(device)))
             pc.eval()
 
             with torch.no_grad():
@@ -230,14 +239,34 @@ def main(args):
             PC_MSEs.append(float(to_np(torch.mean((seq - PC_recall) ** 2))))
             HN_MSEs.append(float(to_np(torch.mean((seq - HN_recall) ** 2))))
 
+            # calculate SSIM
+            """
+            However this is not a really good measurement for memory retrievals
+
+            Because HN will always retrieve some digit for us, whose ssim maybe similar to the correct
+            memory but which can be totally wrong
+            """
+            
+            PC_SSIM, HN_SSIM = 0, 0
+            for k in range(seq_len):
+                PC_SSIM += float(ssim(to_np(seq[k]), to_np(PC_recall[k]))) / seq_len
+                HN_SSIM += float(ssim(to_np(seq[k]), to_np(HN_recall[k]))) / seq_len
+            PC_SSIMs.append(PC_SSIM)
+            HN_SSIMs.append(HN_SSIM)
+
     # save everything at this particular seed
     if mode == 'recall':
         results = {}
         results["PC"] = PC_MSEs
         results["HN"] = HN_MSEs
-        print(results)
         json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{query_type}_data{args.data_type}.json", 'w'))
 
+        # save ssim
+        ssims = {}
+        ssims["PC"] = PC_SSIMs
+        ssims["HN"] = HN_SSIMs
+        print(ssims)
+        json.dump(ssims, open(num_path + f"/SSIMs_seed{seed}_query{query_type}_data{args.data_type}.json", 'w'))
 
 if __name__ == "__main__":
     for s in args.seed:
