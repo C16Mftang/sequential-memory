@@ -105,8 +105,8 @@ def main(args):
 
             # add the loss in this batch
             epoch_loss += batch_loss / batch_size
-
-        print(f'Iteration {learn_iter+1}, loss {epoch_loss}, time {time.time()-epoch_start_time} seconds')
+        if (learn_iter + 1) % 10 == 0:
+            print(f'Iteration {learn_iter+1}, loss {epoch_loss}, time {time.time()-epoch_start_time} seconds')
         losses.append(epoch_loss)
 
     # cued prediction/inference
