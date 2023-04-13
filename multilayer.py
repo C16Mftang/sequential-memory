@@ -38,12 +38,12 @@ parser.add_argument('--seed', type=int, default=[1], nargs='+',
                     help='seed for model init (default: 1); can be multiple, separated by space')
 parser.add_argument('--latent-size', type=int, default=480,
                     help='hidden size for training (default: 256)')
-parser.add_argument('--input-size', type=int, default=784,
-                    help='input size for training (default: 10)')
+# parser.add_argument('--input-size', type=int, default=784,
+#                     help='input size for training (default: 10)')
 parser.add_argument('--lr', type=float, default=1e-4,
                     help='learning rate for PC')
-parser.add_argument('--epochs', type=int, default=200,
-                    help='number of epochs to train (default: 200)')
+parser.add_argument('--epochs', type=int, default=100,
+                    help='number of epochs to train (default: 100)')
 parser.add_argument('--nonlinearity', type=str, default='tanh',
                     help='nonlinear function used in the model')
 parser.add_argument('--mode', type=str, default='train', choices=['train', 'recall'],
@@ -51,6 +51,8 @@ parser.add_argument('--mode', type=str, default='train', choices=['train', 'reca
 parser.add_argument('--query', type=str, default='online', choices=['online', 'offline'],
                     help='how you query the recall; online means query with true memory at each time, \
                         offline means query with the predictions')
+parser.add_argument('--data', type=str, default='mnist', choices=['mnist', 'cifar'],
+                    help='which dataset to memorize')
 args = parser.parse_args()
 
 
@@ -110,28 +112,40 @@ def _recall(model, seq, inf_iters, inf_lr, args, device):
 
 def _plot_recalls(recall, args):
     seq_len = recall.shape[0]
+
     fig, ax = plt.subplots(1, seq_len, figsize=(seq_len, 1))
     for j in range(seq_len):
-        ax[j].imshow(to_np(recall[j].reshape(28, 28)), cmap='gray_r')
+        if args.data == 'mnist':
+            img = to_np(recall[j].reshape((28, 28))) 
+        else:
+            img = to_np(recall[j].reshape((3, 32, 32)).permute(1, 2, 0))
+
+        ax[j].imshow(img, cmap='gray_r')
         ax[j].axis('off')
     plt.tight_layout()
-    plt.savefig(fig_path + f'/mtPC_len{seq_len}_query{args.query}')
+    plt.savefig(fig_path + f'/mtPC_len{seq_len}_query{args.query}_{args.data}')
 
-def _plot_memory(x):
+def _plot_memory(x, args):
     seq_len = x.shape[0]
+
     fig, ax = plt.subplots(1, seq_len, figsize=(seq_len, 1))
     for j in range(seq_len):
-        ax[j].imshow(to_np(x[j].reshape(28, 28)), cmap='gray_r')
+        if args.data == 'mnist':
+            img = to_np(x[j].reshape((28, 28))) 
+        else:
+            img = to_np(x[j].reshape((3, 32, 32)).permute(1, 2, 0))
+
+        ax[j].imshow(img, cmap='gray_r')
         ax[j].axis('off')
     plt.tight_layout()
-    plt.savefig(fig_path + f'/memory_len{seq_len}')
+    plt.savefig(fig_path + f'/memory_len{seq_len}_{args.data}')
 
-def _plot_PC_loss(loss, seq_len, learn_iters):
+def _plot_PC_loss(loss, seq_len, learn_iters, dataset):
     # plotting loss for tunning; temporary
     plt.figure()
     plt.plot(loss, label='squared error sum')
     plt.legend()
-    plt.savefig(fig_path + f'/losses_len{seq_len}_iters{learn_iters}')
+    plt.savefig(fig_path + f'/losses_len{seq_len}_iters{learn_iters}_{dataset}')
         
 
 def main(args):
@@ -143,9 +157,11 @@ def main(args):
     learn_iters = args.epochs
     learn_lr = args.lr
     latent_size = args.latent_size
-    input_size = args.input_size
+    # input_size = args.input_size
     seed = args.seed
     mode = args.mode
+    dataset = args.data
+    input_size = 784 if dataset == 'mnist' else 3072
     
     # inference variables: no need to tune too much
     inf_iters = 100
@@ -157,7 +173,10 @@ def main(args):
         print(f'Training variables: seq_len:{seq_len}; seed:{seed}')
 
         # load data
-        seq = load_sequence_mnist(seed, seq_len, order=False).to(device)
+        if dataset == 'mnist':
+            seq = load_sequence_mnist(seed, seq_len, order=False).to(device)
+        elif dataset == 'cifar':
+            seq = load_sequence_cifar(seed, seq_len).to(device)
         seq = seq.reshape((seq_len, input_size)) # seq_lenx784
         
         # multilayer PC
@@ -165,14 +184,14 @@ def main(args):
         optimizer = torch.optim.Adam(model.parameters(), lr=learn_lr)
 
         # path to save model to/load model from
-        PATH = os.path.join(model_path, f'PC_len{seq_len}_seed{seed}.pt')
+        PATH = os.path.join(model_path, f'PC_len{seq_len}_seed{seed}_{dataset}.pt')
 
         if mode == 'train':
             # train PC
             PC_losses = train_PC(model, optimizer, seq, learn_iters, inf_iters, inf_lr, device)
             # save the current model and plot the loss for tunning
             torch.save(model.state_dict(), PATH)
-            _plot_PC_loss(PC_losses, seq_len, learn_iters)
+            _plot_PC_loss(PC_losses, seq_len, learn_iters, dataset)
         
         elif mode == 'recall':
             # recall mode, no training need, fast
@@ -184,14 +203,14 @@ def main(args):
 
             if seq_len <= 16:
                 _plot_recalls(recalls, args)
-                _plot_memory(seq)
+                _plot_memory(seq, args)
             
             MSEs.append(float(to_np(torch.mean((seq - recalls) ** 2))))
 
     if mode == 'recall':
         results = {}
         results["PC"] = MSEs
-        json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{args.query}.json", 'w'))
+        json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{args.query}_{args.data}.json", 'w'))
 
 if __name__ == "__main__":
     for s in args.seed:
