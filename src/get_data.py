@@ -50,6 +50,33 @@ def generate_correlated_binary_patterns(P, N, b, device, seed=1):
 
     return to_torch(X, device)
 
+def load_aliased_mnist(seed):
+     # Set random seed for PyTorch random number generator
+    torch.manual_seed(seed)
+
+    # Define the transform to convert the images to PyTorch tensors
+    transform = transforms.Compose([transforms.ToTensor()])
+
+    # Set up MNIST dataset
+    mnist = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+
+    # Filter dataset to include only digits 1, 2, and 3
+    mnist_123 = [img for img, label in mnist if label in [1, 2, 3]]
+
+    # Sample 5 random indices from the filtered dataset
+    indices = torch.randperm(len(mnist_123))[:5]
+
+    # Extract images corresponding to the sampled indices
+    sequence = [mnist_123[i] for i in indices]
+
+    # Replace the last two images with the first two images
+    sequence[3], sequence[4] = sequence[1], sequence[0]
+
+    # Convert images to PyTorch tensors and stack into a sequence tensor
+    sequence_tensor = torch.stack(sequence).squeeze()
+
+    return sequence_tensor
+
 def load_sequence_mnist(seed, seq_len, order=True, binary=True):
     # Set the random seed for reproducibility
     torch.manual_seed(seed)
@@ -84,6 +111,35 @@ def load_sequence_mnist(seed, seq_len, order=True, binary=True):
 
     return sequence
 
+def load_sequence_emnist(seed, seq_len):
+    # Define the transform to convert the images to PyTorch tensors
+    transform = transforms.Compose([transforms.ToTensor()])
+
+    # Load the MNIST dataset
+    emnist = datasets.EMNIST(root='./data', train=True, split='balanced', download=True, transform=transform)
+
+    # Initialize an empty tensor to store the sequence of digits
+    sequence = torch.zeros((seq_len, 28, 28))
+
+    # Set the random seed for reproducibility
+    torch.manual_seed(seed)
+
+    i = 0
+    while i < seq_len:
+        idx = torch.randint(len(emnist), (1,))
+        image, target = emnist[idx[0]]
+        if target >= 10:  # Ignore digits
+            sequence[i] = image.squeeze()
+            i += 1
+
+    # Sample `seq_len` random images from the MNIST dataset
+    # indices = torch.randint(0, len(emnist), (seq_len,))
+    # for i, idx in enumerate(indices):
+    #     img, _ = emnist[idx]
+    #     sequence[i] = img.squeeze()
+
+    return sequence
+
 def load_sequence_cifar(seed, seq_len):
     # Set the random seed for reproducibility
     torch.manual_seed(seed)
@@ -104,9 +160,6 @@ def load_sequence_cifar(seed, seq_len):
         sequence[i] = img
 
     return sequence
-
-
-    
 
 def get_seq_mnist(datapath, seq_len, sample_size, batch_size, seed, device):
     """Get batches of sequence mnist
@@ -175,15 +228,7 @@ def get_mnist(datapath, sample_size, sample_size_test, batch_size, seed, device,
     return (X, y), (X_test, y_test)
 
 
-def get_rotating_mnist(datapath, 
-                       seq_len, 
-                       sample_size, 
-                       test_size, 
-                       batch_size, 
-                       seed, 
-                       device, 
-                       angle=10, 
-                       test_digit=9):
+def get_rotating_mnist(datapath, seq_len, sample_size, batch_size, seed, angle):
     """digit: digit used to train the model
     
     test_digit: digit used to test the generalization of the model
@@ -198,14 +243,14 @@ def get_rotating_mnist(datapath,
     # randomly sample 
     dtype =  torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
     # get data from particular classes
-    idx = (train.targets != test_digit).bool()
-    test_idx = (train.targets == test_digit).bool()
-    train_data = train.data[idx] / 255.
-    test_data = train.data[test_idx] / 255.
+    # idx = (train.targets != test_digit).bool()
+    # test_idx = (train.targets == test_digit).bool()
+    train_data = train.data / 255.
+    # test_data = train.data[test_idx] / 255.
 
     random.seed(seed)
     train_data = train_data[random.sample(range(len(train_data)), sample_size)] # [sample_size, h, w]
-    test_data = test_data[random.sample(range(len(test_data)), test_size)]
+    # test_data = test_data[random.sample(range(len(test_data)), test_size)]
     h, w = train_data.shape[-2], train_data.shape[-1]
     # rotate images
     train_sequences = torch.zeros((sample_size, seq_len, h, w))
@@ -215,5 +260,5 @@ def get_rotating_mnist(datapath,
 
     train_loader = DataLoader(DataWrapper(train_sequences), batch_size=batch_size)
     
-    return train_loader, test_data
+    return train_loader
 
