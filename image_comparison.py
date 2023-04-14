@@ -36,7 +36,7 @@ if not os.path.exists(model_path):
 
 # add parser as varaible of the main class
 parser = argparse.ArgumentParser(description='Sequential memories')
-parser.add_argument('--max-seq-len', type=int, default=10, 
+parser.add_argument('--seq-len-max', type=int, default=11, 
                     help='max input length')
 parser.add_argument('--seq-len-step', type=int, default=1, 
                     help='seq len increase rate')
@@ -45,7 +45,7 @@ parser.add_argument('--seed', type=int, default=[1], nargs='+',
 parser.add_argument('--lr', type=float, default=2e-5,
                     help='learning rate for PC')
 parser.add_argument('--epochs', type=int, default=200,
-                    help='number of epochs to train (default: 100)')
+                    help='number of epochs to train (default: 200)')
 parser.add_argument('--HN-type', type=str, default='softmax',
                     help='type of MAHN default to softmax')
 parser.add_argument('--query', type=str, default='online', choices=['online', 'offline'],
@@ -130,7 +130,7 @@ def _hn_recall(model, seq, query_type, device, binary=False):
 
     return recall
 
-def _plot_recalls(recall, model_name, seq_len, args):
+def _plot_recalls(recall, model_name, args):
     seq_len = recall.shape[0]
     fig, ax = plt.subplots(1, seq_len, figsize=(seq_len, 1))
     for j in range(seq_len):
@@ -168,21 +168,26 @@ def main(args):
     learn_iters = args.epochs
     learn_lr = args.lr
     sep = args.HN_type
-    max_seq_len = args.max_seq_len
+    seq_len_max = args.seq_len_max
     seq_len_step = args.seq_len_step
     query_type = args.query
     mode = args.mode
     beta = args.beta
 
     # loop through different seq_len
-    PC_MSEs = []
-    HN_MSEs = []
-    for seq_len in np.arange(2, max_seq_len, seq_len_step):
+    PC_MSEs, HN_MSEs = [], []
 
-        # if seq_len == 64:
-        #     learn_iters += 100
-        # if seq_len == 256:
-        #     learn_iters += 100
+    seq_lens = [2 ** pow for pow in range(1, seq_len_max)]
+    for seq_len in seq_lens:
+
+        if seq_len == 64:
+            learn_iters += 200
+        if seq_len == 256:
+            learn_iters += 200
+        if seq_len == 256:
+            learn_iters += 200
+        if seq_len == 1024:
+            learn_iters += 200
 
         print(f'Training variables: seq_len:{seq_len}; seed:{seed}')
 
@@ -215,9 +220,9 @@ def main(args):
                 PC_recall = _pc_recall(pc, seq, query_type, device)
                 HN_recall = _hn_recall(hn, seq, query_type, device)
 
-            _plot_recalls(PC_recall, 'PC', seq_len, args)
+            _plot_recalls(PC_recall, 'PC', args)
             HN_name = f'HN{sep}beta{beta}' if sep == 'softmax' else f'HN{sep}'
-            _plot_recalls(HN_recall, HN_name, seq_len, args)
+            _plot_recalls(HN_recall, HN_name, args)
 
             # plot the original memories
             _plot_memory(seq, seed)
