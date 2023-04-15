@@ -446,4 +446,22 @@ class MovingMNIST(Dataset):
         tmp = '    Target Transforms (if any): '
         fmt_str += '{0}{1}'.format(tmp, self.target_transform.__repr__().replace('\n', '\n' + ' ' * len(tmp)))
         return fmt_str
+    
+def get_moving_mnist(datapath, sample_size, batch_size, seed):
+    """
+    Load the moving MNIST dataset
+    """
+    data_transforms = transforms.Compose([
+        transforms.Resize((32, 32)),
+        transforms.ToTensor()
+    ])
+
+    train_set = MovingMNIST(root=datapath, train=True, download=True, transform=data_transforms)
+
+    random.seed(seed)
+    train_set = torch.utils.data.Subset(train_set, random.sample(range(len(train_set)), sample_size))
+
+    train_loader = torch.utils.data.DataLoader(dataset=train_set, batch_size=batch_size, shuffle=False)
+
+    return train_loader
 
