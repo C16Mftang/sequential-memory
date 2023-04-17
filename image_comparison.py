@@ -180,7 +180,7 @@ def main(args):
     seq_lens = [2 ** pow for pow in range(1, seq_len_max)]
     for seq_len in seq_lens:
 
-        if seq_len == 64:
+        if seq_len == 128:
             learn_iters += 200
         if seq_len == 256:
             learn_iters += 200
@@ -220,12 +220,13 @@ def main(args):
                 PC_recall = _pc_recall(pc, seq, query_type, device)
                 HN_recall = _hn_recall(hn, seq, query_type, device)
 
-            _plot_recalls(PC_recall, 'PC', args)
-            HN_name = f'HN{sep}beta{beta}' if sep == 'softmax' else f'HN{sep}'
-            _plot_recalls(HN_recall, HN_name, args)
+            if seq_len <= 16:
+                _plot_recalls(PC_recall, 'PC', args)
+                HN_name = f'HN{sep}beta{beta}' if sep == 'softmax' else f'HN{sep}'
+                _plot_recalls(HN_recall, HN_name, args)
 
-            # plot the original memories
-            _plot_memory(seq, seed)
+                # plot the original memories
+                _plot_memory(seq, seed)
 
             # calculate MSE at each one, save file name with seed
             PC_MSEs.append(float(to_np(torch.mean((seq - PC_recall) ** 2))))
