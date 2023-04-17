@@ -168,9 +168,18 @@ def main(args):
     inf_lr = 1e-2
 
     MSEs = []
-    seq_lens = [2 ** pow for pow in range(1, seq_len_max)]
+    seq_lens = [2 ** pow for pow in range(5, seq_len_max)]
     for seq_len in seq_lens:
-        print(f'Training variables: seq_len:{seq_len}; seed:{seed}')
+        if seq_len == 16:
+            learn_lr /= 2
+        if seq_len == 32:
+            learn_lr /= 2
+        if seq_len == 128:
+            learn_lr /= 2
+        if seq_len == 512:
+            learn_lr /= 2
+
+        print(f'Training variables: seq_len:{seq_len}; seed:{seed}; lr:{learn_lr}')
 
         # load data
         if dataset == 'mnist':
