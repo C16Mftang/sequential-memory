@@ -1,4 +1,5 @@
 import os
+import argparse
 import time
 import torch
 import torch.nn as nn
@@ -6,139 +7,267 @@ import numpy as np
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 plt.style.use('ggplot')
-from src.models import TemporalPC
+from sklearn.decomposition import PCA
+from src.models import TemporalPC, MultilayertPC
 from src.utils import *
 from src.get_data import *
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(device)
 
-result_path = os.path.join('./results/', 'image_rotation')
+path = 'generalization'
+result_path = os.path.join('./results/', path)
 if not os.path.exists(result_path):
     os.makedirs(result_path)
 
-# hyper parameters
-sample_size = 1000
-test_size = 1
-batch_size = 500
-seq_len = 10
-inf_iters = 100
-inf_lr = 1e-2
-learn_iters = 100
-learn_lr = 1e-4
-latent_size = 256
-control_size = 10
-sparse_penal = 0
-flattened_size = 784
-n_cued = 1 # number of cued images
-assert(n_cued < seq_len)
-seed = 4
-angle = 20
+num_path = os.path.join('./results/', path, 'numerical')
+if not os.path.exists(num_path):
+    os.makedirs(num_path)
 
-# load data
-loader, test_data = get_rotating_mnist('./data', 
-                                        seq_len, 
-                                        sample_size,
-                                        test_size,
-                                        batch_size,
-                                        seed, 
-                                        device, 
-                                        angle=angle, 
-                                        test_digit=5)
+fig_path = os.path.join('./results/', path, 'fig')
+if not os.path.exists(fig_path):
+    os.makedirs(fig_path)
 
-model = TemporalPC(control_size, latent_size, flattened_size, nonlin='linear').to(device)
-optimizer = torch.optim.SGD(model.parameters(), lr=learn_lr)
+model_path = os.path.join('./results/', path, 'models')
+if not os.path.exists(model_path):
+    os.makedirs(model_path)
 
-# training
-losses = []
-for learn_iter in range(learn_iters):
-    epoch_start_time = time.time()
-    epoch_loss = 0
-    for xs, _ in loader:
-        us = torch.zeros((batch_size, seq_len, control_size)).to(device)
-        xs = xs.reshape((batch_size, seq_len, -1)).to(device)
-        prev_z = model.init_hidden(batch_size).to(device)
-        batch_loss = 0
-        for k in range(seq_len):
-            x, u = xs[:, k:k+1, :].squeeze(), us[:, k:k+1, :].squeeze()
-            optimizer.zero_grad()
-            model.inference(inf_iters, inf_lr, x, u, prev_z)
-            energy = model.update_grads(x, u, prev_z)
-            energy.backward()
-            optimizer.step()
+# training parameters as command line arguments
+parser = argparse.ArgumentParser(description='Generalization capabilities')
+parser.add_argument('--sample-size', type=int, default=1000, 
+                    help='number of sequences with motion')
+parser.add_argument('--test-size', type=int, default=5, 
+                    help='number of unseen sequences with motion for testing')
+parser.add_argument('--batch-size', type=int, default=500, 
+                    help='training batch size')
+parser.add_argument('--input-size', type=int, default=784,
+                    help='input size for training (default: 784)')
+parser.add_argument('--latent-size', type=int, default=480,
+                    help='hidden size for training (default: 480)')
+parser.add_argument('--seed', type=int, default=1,
+                    help='seed for model init and data sampling')
+parser.add_argument('--angle', type=int, default=20,
+                    help='rotating angles for the rotational experiments')
+parser.add_argument('--lr', type=float, default=1e-4,
+                    help='learning rate for PC')
+parser.add_argument('--epochs', type=int, default=100,
+                    help='number of epochs to train (default: 100)')
+parser.add_argument('--query', type=str, default='offline', choices=['online', 'offline'],
+                    help='how you query the recall; online means query with true memory at each time, \
+                        offline means query with the predictions')
+parser.add_argument('--mode', type=str, default='train', choices=['train', 'recall', 'generalize', 'PCA'],
+                    help='mode of the script: train or recall or generalization')
+parser.add_argument('--nonlinearity', type=str, default='tanh',
+                    help='nonlinear function used in the model')
+parser.add_argument('--dynamic', type=str, default='rotation', choices=['rotation', 'bouncing'],
+                    help='type of dynamics')
+args = parser.parse_args()
+
+
+def train_batched_input(model, optimizer, loader, learn_iters, inf_iters, inf_lr, device):
+    losses = []
+    start_time = time.time()
+    for learn_iter in range(learn_iters):
+        epoch_loss = 0
+        for xs in loader:
+            xs = xs[0]
+            batch_size, seq_len = xs.shape[:2]
+
+            # reshape image to vector
+            xs = xs.reshape((batch_size, seq_len, -1)).to(device)
+
+            # initialize the hidden activities
+            prev_z = model.init_hidden(batch_size).to(device)
+
+            batch_loss = 0
+            for k in range(seq_len):
+                x = xs[:, k, :].clone().detach()
+                optimizer.zero_grad()
+                model.inference(inf_iters, inf_lr, x, prev_z)
+                energy = model.update_grads(x, prev_z)
+                energy.backward()
+                optimizer.step()
+                prev_z = model.z.clone().detach()
+
+                # add up the loss value at each time step
+                batch_loss += energy.item() / seq_len
+
+            # add the loss in this batch
+            epoch_loss += batch_loss / batch_size
+
+        losses.append(epoch_loss)
+        if (learn_iter + 1) % 10 == 0:
+            print(f'Epoch {learn_iter+1}, loss {epoch_loss}')
+
+    print(f'training PC complete, time: {time.time() - start_time}')
+    return losses
+
+def _generalize(model, cue, seq_len, inf_iters, inf_lr, device):
+    N = cue.shape[-1]
+    recall = torch.zeros((seq_len, N)).to(device)
+    recall[0] = cue.clone().detach()
+    prev_z = model.init_hidden(1).to(device)
+
+    # only infer the latent of the cue, then forward pass
+    x = cue.clone().detach()
+    model.inference(inf_iters, inf_lr, x, prev_z)
+    prev_z = model.z.clone().detach()
+
+    # fast forward pass
+    for k in range(1, seq_len):
+        prev_z, pred_x = model(prev_z)
+        recall[k] = pred_x
+
+    return recall
+
+def _recall(model, seq, inf_iters, inf_lr, args, device):
+    seq_len, N = seq.shape
+    recall = torch.zeros((seq_len, N)).to(device)
+    recall[0] = seq[0].clone().detach()
+    prev_z = model.init_hidden(1).to(device)
+
+    if args.query == 'online':
+        # infer the latent state at each time step, given correct previous input
+        for k in range(seq_len-1):
+            x = seq[k].clone().detach()
+            model.inference(inf_iters, inf_lr, x, prev_z)
             prev_z = model.z.clone().detach()
+            _, pred_x = model(prev_z)
+            recall[k+1] = pred_x
 
-            # add up the loss value at each time step
-            batch_loss += energy.item() / seq_len
-
-        # add the loss in this batch
-        epoch_loss += batch_loss / batch_size
-
-    print(f'Iteration {learn_iter+1}, loss {epoch_loss}, time {time.time()-epoch_start_time} seconds')
-    losses.append(epoch_loss)
-
-# cued prediction/inference
-"""Should try to adapt this to batched test data!!!"""
-print('Cued inference begins')
-inf_iters = 5000
-
-us = torch.zeros((test_size, seq_len, control_size)).to(device)
-test_data = test_data.reshape((test_size, n_cued, flattened_size)).to(device)
-prev_z = model.init_hidden(test_size).to(device)
-
-# collect the cues
-cue = torch.zeros((test_size, seq_len, flattened_size))
-
-# collect the retrievals
-recall = torch.zeros((test_size, seq_len, flattened_size))
-
-for k in range(seq_len):
-    u = us[:, k, :].squeeze() # [test_size, 784]
-    if k + 1 <= n_cued:
-        x = test_data[:, k, :]
-        model.inference(inf_iters, inf_lr, x, u, prev_z)
+    elif args.query == 'offline':
+        # only infer the latent of the cue, then forward pass
+        x = seq[0].clone().detach()
+        model.inference(inf_iters, inf_lr, x, prev_z)
         prev_z = model.z.clone().detach()
-        recall[:, k, :] = x.clone().detach()
-        cue[:, k, :] = x.clone().detach()
-    else:
-        prev_z, pred_x = model(u, prev_z)
-        recall[:, k, :] = pred_x
-        cue[:, k, :] = torch.zeros_like(pred_x)
 
+        # fast forward pass
+        for k in range(1, seq_len):
+            prev_z, pred_x = model(prev_z)
+            recall[k] = pred_x
 
-# visualizations
-n_mem = 5
-d, _ = next(iter(loader))
-print(d.shape)
-fig, ax = plt.subplots(n_mem, seq_len, figsize=(seq_len, n_mem))
-for i in range(n_mem):
-    for j in range(seq_len):
-        ax[i, j].imshow(to_np(d[i, j]).reshape(28, 28))
-        ax[i, j].axis('off')
-plt.savefig(result_path + f'/memory_size{sample_size}_len{seq_len}_learn{learn_iters}_auto', dpi=150)
+    return recall
 
-plt.figure()
-plt.plot(losses, label='squared error sum')
-plt.legend()
-plt.savefig(result_path + f'/rotation_losses_size{sample_size}_len{seq_len}_learn{learn_iters}_auto', dpi=150)
+def _plot_PC_loss(loss, sample_size, learn_iters):
+    # plotting loss for tunning; temporary
+    plt.figure()
+    plt.plot(loss, label='squared error sum')
+    plt.legend()
+    plt.savefig(fig_path + f'/losses_size{sample_size}_iters{learn_iters}')
 
-def plot_images(x, mode='recall'):
-    fig, ax = plt.subplots(1, seq_len, figsize=(seq_len, test_size))
-    for j in range(seq_len):
-        ax[j].imshow(to_np(x[j].squeeze().reshape(28, 28)))
-        ax[j].axis('off')
-    plt.savefig(result_path + f'/{mode}_size{sample_size}_len{seq_len}_learn{learn_iters}_auto', dpi=150)
+def _plot_recalls(recall, test_size, args):
+    seq_len = recall.shape[1]
+    fig, ax = plt.subplots(test_size, seq_len, figsize=(seq_len, test_size))
+    for i in range(test_size):
+        for j in range(seq_len):
+            ax[i, j].imshow(to_np(recall[i, j].reshape(28, 28)), cmap='gray_r')
+            ax[i, j].axis('off')
+    plt.tight_layout()
+    plt.savefig(fig_path + f'/{args.mode}_size{args.sample_size}_{args.query}_{args.dynamic}', dpi=150)
 
-plot_images(cue.squeeze(), mode='cue')
-plot_images(recall.squeeze(), mode='recall')
+def main(args):
+    # hyper parameters
+    seq_len = 10
+    sample_size = args.sample_size
+    test_size = args.test_size
+    batch_size = args.batch_size
+    learn_iters = args.epochs
+    learn_lr = args.lr
+    latent_size = args.latent_size
+    input_size = args.input_size
+    seed = args.seed
+    angle = args.angle
+    nonlin = args.nonlinearity
+    mode = args.mode
 
-Wr = to_np(model.Wr.weight)
-plt.figure()
-plt.imshow(Wr)
-plt.title('Recurrent weight')
-plt.grid(visible=None)
-plt.colorbar()
-plt.savefig(result_path + f'/Wr_size{sample_size}_len{seq_len}_learn{learn_iters}_auto', dpi=150)
+    # fix these
+    inf_iters = 100
+    inf_lr = 1e-2
+
+    # load data
+    loader = get_rotating_mnist('./data', seq_len, sample_size, batch_size, seed, angle)
+
+    # prepare model
+    model = MultilayertPC(latent_size, input_size, nonlin).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learn_lr)
+
+    PATH = os.path.join(model_path, f'PC_rotation_size{sample_size}_nonlin{nonlin}.pt')
+    if mode == 'train':
+        # training
+        PC_losses = train_batched_input(model, optimizer, loader, learn_iters, inf_iters, inf_lr, device)
+        torch.save(model.state_dict(), PATH)
+
+        _plot_PC_loss(PC_losses, sample_size, learn_iters)
+
+    elif mode == 'generalize':
+        model.load_state_dict(torch.load(PATH, map_location=torch.device(device)))
+        model.eval()
+
+        # load EMNIST
+        test_data = load_sequence_emnist(48, test_size).to(device) # test_sizex28x28
+        test_data = test_data.reshape((-1, input_size)) # test_sizex784
+        
+        generalization = torch.zeros((test_size, seq_len, input_size))
+        with torch.no_grad():
+            for i in range(test_size):
+                cue = test_data[i] # 1x784
+                generalization[i] = _generalize(model, cue, seq_len, inf_iters, inf_lr, device)
+
+        _plot_recalls(generalization, test_size, args)
+
+    elif mode == 'recall':
+        # select a few examples from the training set to recall
+        model.load_state_dict(torch.load(PATH, map_location=torch.device(device)))
+        model.eval()
+
+        test_data = next(iter(loader))[0][:test_size].to(device)
+        test_data = test_data.reshape((test_size, seq_len, -1)) # test_size, seq_len, 784
+
+        recalls = torch.zeros((test_size, seq_len, input_size))
+        with torch.no_grad():
+            for i in range(test_size):
+                seq = test_data[i]
+                recalls[i] = _recall(model, seq, inf_iters, inf_lr, args, device)
+
+        _plot_recalls(recalls, test_size, args)
+
+    elif mode == 'PCA':
+        n_pcs = 3
+        model.load_state_dict(torch.load(PATH, map_location=torch.device(device)))
+        model.eval()
+
+        test_data = next(iter(loader))[0].to(device) # bsz, seq, 28, 28
+        test_data = test_data.reshape((batch_size, seq_len, -1)) # bsz, seq_len, 784
+
+        pcs = np.zeros((batch_size, seq_len, n_pcs))
+
+        prev_z = model.init_hidden(batch_size).to(device) # bsz, 480
+
+        x = test_data[:, 0, :].clone().detach()
+        model.inference(inf_iters, inf_lr, x, prev_z)
+        prev_z = model.z.clone().detach().squeeze() # bsz, 480
+
+        # PCA on the current step's hidden activity
+        pca = PCA(n_components=n_pcs)
+        pcs[:, 0, :] = pca.fit_transform(to_np(prev_z)) # bsz, 3
+
+        for k in range(1, seq_len):
+            prev_z, _ = model(prev_z) # bsz, 480
+            # independent PCA on the current step's hidden activity
+            pca = PCA(n_components=n_pcs)
+            pcs[:, k, :] = pca.fit_transform(to_np(prev_z)) # bsz, 3
+
+        example = pcs[1:4] # 5xseq_lenx3
+
+        fig = plt.figure(figsize=(4, 3))
+        ax = fig.add_subplot(111, projection='3d')
+        for i in range(example.shape[0]):
+            ax.plot(example[i, :, 0], example[i, :, 1], example[i, :, 2])
+
+        plt.savefig(fig_path + '/PCA', dpi=150)
+            
+if __name__ == "__main__":
+    main(args)
 
 
 

@@ -121,7 +121,7 @@ def main(args):
     nonlin = 'linear'
 
     # inference variables: no need to tune too much
-    inf_iters = 500
+    inf_iters = 100
     inf_lr = 1e-2
 
     MSEs = []
@@ -147,16 +147,16 @@ def main(args):
 
     if mode == 'train':
         # train sPC
-        print('Training single layer tPC')
-        sPC_losses = train_singlelayer_tPC(spc, s_optimizer, seq, learn_iters, device)
-        torch.save(spc.state_dict(), os.path.join(model_path, f'sPC_{sport}_len{seq_len}_seed{seed}.pt'))
-        _plot_PC_loss(sPC_losses, seq_len, learn_iters, f"spc_{sport}")
+        # print('Training single layer tPC')
+        # sPC_losses = train_singlelayer_tPC(spc, s_optimizer, seq, learn_iters, device)
+        # torch.save(spc.state_dict(), os.path.join(model_path, f'sPC_{sport}_len{seq_len}_seed{seed}.pt'))
+        # _plot_PC_loss(sPC_losses, seq_len, learn_iters, f"spc_{sport}")
 
         # train mPC
-        # print('Training multi layer tPC')
-        # mPC_losses = train_multilayer_tPC(mpc, m_optimizer, seq, learn_iters, inf_iters, inf_lr, device)
-        # torch.save(mpc.state_dict(), os.path.join(model_path, f'mPC_{sport}_len{seq_len}_seed{seed}.pt'))
-        # _plot_PC_loss(mPC_losses, seq_len, learn_iters, f"mpc_{sport}")
+        print('Training multi layer tPC')
+        mPC_losses = train_multilayer_tPC(mpc, m_optimizer, seq, learn_iters, inf_iters, inf_lr, device)
+        torch.save(mpc.state_dict(), os.path.join(model_path, f'mPC_{sport}_len{seq_len}_seed{seed}.pt'))
+        _plot_PC_loss(mPC_losses, seq_len, learn_iters, f"mpc_{sport}")
     
     elif mode == 'recall':
         # spc
@@ -170,13 +170,14 @@ def main(args):
         mpc.eval()
 
         with torch.no_grad():
+            inf_iters = 500
             s_recalls = singlelayer_recall(spc, seq, device, args)
-            # m_recalls = multilayer_recall(mpc, seq, inf_iters, inf_lr, args, device)
+            m_recalls = multilayer_recall(mpc, seq, inf_iters, inf_lr, args, device)
             hn_recalls = hn_recall(hn, seq, device, args)
 
         if seq_len <= 16:
             _plot_recalls(s_recalls, f"sPC_{sport}", args)
-            # _plot_recalls(m_recalls, f"mPC_{sport}", args)
+            _plot_recalls(m_recalls, f"mPC_{sport}", args)
             _plot_recalls(hn_recalls, f"HN_{sport}", args)
             _plot_memory(seq)
 

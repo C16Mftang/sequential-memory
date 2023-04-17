@@ -7,6 +7,7 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
 plt.style.use('ggplot')
 from src.models import ModernAsymmetricHopfieldNetwork, MultilayertPC, SingleLayertPC
 from src.utils import *
@@ -44,7 +45,7 @@ parser.add_argument('--epochs', type=int, default=200,
                     help='number of epochs to train (default: 200)')
 parser.add_argument('--nonlinearity', type=str, default='tanh',
                     help='nonlinear function used in the model')
-parser.add_argument('--mode', type=str, default='train', choices=['train', 'recall'],
+parser.add_argument('--mode', type=str, default='train', choices=['train', 'recall', 'PCA'],
                     help='mode of the script: train or recall (just to save time)')
 parser.add_argument('--query', type=str, default='offline', choices=['online', 'offline'],
                     help='how you query the recall; online means query with true memory at each time, \
@@ -54,7 +55,7 @@ parser.add_argument('--data-type', type=str, default='continuous', choices=['bin
                         this should be always continuous')
 args = parser.parse_args()
 
-def _extract_latent(model, seq, inf_iters, inf_lr, args, device):
+def _extract_latent(model, seq, inf_iters, inf_lr, device):
     seq_len, N = seq.shape
     recall = torch.zeros((seq_len, N)).to(device)
     recall[0] = seq[0].clone().detach()
@@ -69,8 +70,14 @@ def _extract_latent(model, seq, inf_iters, inf_lr, args, device):
     for k in range(1, seq_len):
         prev_z, _ = model(prev_z)
         latents.append(to_np(prev_z))
+
+    latents = np.concatenate(latents, axis=0)
+
+    # PCA
+    pca = PCA(n_components=3)
+    transformed_latents = pca.fit_transform(latents)
     
-    return np.concatenate(latents, axis=0)
+    return transformed_latents
 
 def _plot_recalls(recall, model_name, args):
     seq_len = recall.shape[0]
@@ -168,6 +175,21 @@ def main(args):
             _plot_recalls(m_recalls, "mPC", args)
             _plot_recalls(hn_recalls, "HN", args)
             _plot_memory(seq)
+
+    elif mode == 'PCA':
+        # mpc
+        mpc.load_state_dict(torch.load(os.path.join(model_path, f'mPC_len{seq_len}_seed{seed}.pt'), 
+                                       map_location=torch.device(device)))
+        mpc.eval()
+
+        with torch.no_grad():
+            pcs = _extract_latent(mpc, seq, inf_iters, inf_lr, device)
+        
+        fig = plt.figure(figsize=(4, 3))
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot(pcs[:, 0], pcs[:, 1], pcs[:, 2])
+        plt.savefig(fig_path + '/PCA', dpi=150)
+            
 
 if __name__ == "__main__":
     for s in args.seed:

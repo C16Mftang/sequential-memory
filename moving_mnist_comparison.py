@@ -317,6 +317,7 @@ def main(args):
                 _plot_memory(memories, test_size, args, sample_size)
 
             sPC_MSEs.append(float(to_np(torch.mean((memories - s_recalls) ** 2))))
+            mPC_MSEs.append(float(to_np(torch.mean((memories - m_recalls) ** 2))))
             HN_MSEs.append(float(to_np(torch.mean((memories - hn_recalls) ** 2))))
         
     # save everything at this particular seed

@@ -116,6 +116,28 @@ def load_sequence_mnist(seed, seq_len, order=True, binary=True):
 
     return sequence
 
+def replace_images(seq, seed, N):
+    X = seq.clone()
+    # set random seed for reproducibility
+    torch.manual_seed(seed)
+    
+    # load mnist test set
+    test_set = datasets.MNIST(root='./data', train=False, download=True)
+    
+    # randomly select N indices from the sequence
+    indices = torch.randperm(X.shape[0])[:N]
+
+    # use the same seed for selecting the filling test data
+    torch.manual_seed(2023)
+    random_index = torch.randint(len(test_set), size=(1,))
+    
+    # replace images at selected indices with random images from test set
+    for i in indices:
+        X[i] = test_set.data[random_index]
+    
+    # output the changed sequence
+    return X
+
 def load_sequence_emnist(seed, seq_len):
     # Define the transform to convert the images to PyTorch tensors
     transform = transforms.Compose([transforms.ToTensor()])

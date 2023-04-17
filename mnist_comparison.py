@@ -59,6 +59,8 @@ parser.add_argument('--order', type=str, default='unorder', choices=['order', 'u
                     help='whether to load digits following 0-9 order')
 parser.add_argument('--beta', type=int, default=1,
                     help='beta value for the MCHN')
+parser.add_argument('--repeat', type=int, default=0,
+                    help='number of repeating digits')
 args = parser.parse_args()
 
 
@@ -202,6 +204,9 @@ def main(args):
         seq = load_sequence_mnist(seed, seq_len, order=order, binary=binary).to(device)
         seq = seq.reshape((seq_len, input_size)) # seq_lenx784
 
+        if args.repeat > 0:
+            seq = replace_images(seq, seed=seed, N=args.repeat)
+
         # temporal PC
         pc = SingleLayertPC(input_size=input_size, nonlin='linear').to(device)
         optimizer = torch.optim.Adam(pc.parameters(), lr=learn_lr)
@@ -209,7 +214,7 @@ def main(args):
         # HN with linear separation function
         hn = ModernAsymmetricHopfieldNetwork(input_size, sep=sep, beta=beta).to(device)
 
-        PATH = os.path.join(model_path, f'PC_len{seq_len}_seed{seed}_{args.data_type}.pt')
+        PATH = os.path.join(model_path, f'PC_len{seq_len}_seed{seed}_{args.data_type}_repeat{args.repeat}.pt')
         if mode == 'train':
             # training PC
             # note that there is no need to train MAHN - we can just write down the retrieval
