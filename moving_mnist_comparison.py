@@ -210,7 +210,7 @@ def _plot_recalls(recall, test_size, args, name, sample_size):
     fig, ax = plt.subplots(test_size, seq_len, figsize=(seq_len, test_size))
     for i in range(test_size):
         for j in range(seq_len):
-            ax[i, j].imshow(to_np(recall[i, j].reshape(32, 32)), cmap='gray_r')
+            ax[i, j].imshow(to_np(recall[i, j].reshape(32, 32)), cmap='gray')
             ax[i, j].axis('off')
     plt.tight_layout()
     plt.savefig(fig_path + f'/{name}_size{sample_size}_{args.query}', dpi=200)
@@ -220,7 +220,7 @@ def _plot_memory(x, test_size, args, sample_size):
     fig, ax = plt.subplots(test_size, seq_len, figsize=(seq_len, test_size))
     for i in range(test_size):
         for j in range(seq_len):
-            ax[i, j].imshow(to_np(x[i, j].reshape(32, 32)), cmap='gray_r')
+            ax[i, j].imshow(to_np(x[i, j].reshape(32, 32)), cmap='gray')
             ax[i, j].axis('off')
     plt.tight_layout()
     plt.savefig(fig_path + f'/memory_size{sample_size}', dpi=200)
@@ -264,7 +264,6 @@ def main(args):
         # MCHN 
         hn = ModernAsymmetricHopfieldNetwork(input_size, sep='softmax', beta=5).to(device)
 
-        PATH = os.path.join(model_path, f'PC_rotation_size{sample_size}_nonlin{nonlin}.pt')
         if mode == 'train single':
             # training single layer tPC
             sPC_losses = train_batched_input(spc, s_optimizer, loader, learn_iters, inf_iters, inf_lr, device, nlayer=1)
@@ -310,7 +309,7 @@ def main(args):
                     m_recalls[i] = _pc_recall(mpc, memory, inf_iters, inf_lr, args, device, nlayer=2)
                     hn_recalls[i] = _hn_recall(hn, memory, memories, device, args)
 
-            if sample_size == 20:
+            if sample_size == 50:
                 _plot_recalls(s_recalls, test_size, args, 'spc', sample_size)
                 _plot_recalls(m_recalls, test_size, args, 'mpc', sample_size)
                 _plot_recalls(hn_recalls, test_size, args, 'hn', sample_size)
