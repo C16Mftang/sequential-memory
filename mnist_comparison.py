@@ -59,8 +59,8 @@ parser.add_argument('--order', type=str, default='unorder', choices=['order', 'u
                     help='whether to load digits following 0-9 order')
 parser.add_argument('--beta', type=int, default=1,
                     help='beta value for the MCHN')
-parser.add_argument('--repeat', type=int, default=0,
-                    help='number of repeating digits')
+parser.add_argument('--repeat', type=float, default=0,
+                    help='percentage of repeating digits')
 args = parser.parse_args()
 
 
@@ -143,7 +143,7 @@ def _plot_recalls(recall, model_name, args):
         ax[j].imshow(to_np(recall[j].reshape(28, 28)), cmap='gray_r')
         ax[j].axis('off')
     plt.tight_layout()
-    plt.savefig(fig_path + f'/{model_name}_len{seq_len}_query{args.query}_data{args.data_type}', dpi=150)
+    plt.savefig(fig_path + f'/{model_name}_len{seq_len}_query{args.query}_data{args.data_type}_repeat{int(args.repeat*100)}percen', dpi=150)
 
 def _plot_memory(x, seed, args):
     seq_len = x.shape[0]
@@ -152,7 +152,7 @@ def _plot_memory(x, seed, args):
         ax[j].imshow(to_np(x[j].reshape(28, 28)), cmap='gray_r')
         ax[j].axis('off')
     plt.tight_layout()
-    plt.savefig(fig_path + f'/memory_len{seq_len}_seed{seed}_data{args.data_type}', dpi=150)
+    plt.savefig(fig_path + f'/memory_len{seq_len}_seed{seed}_data{args.data_type}_repeat{int(args.repeat*100)}percen', dpi=150)
 
 def _plot_PC_loss(loss, seq_len, learn_iters, data_type='continuous'):
     # plotting loss for tunning; temporary
@@ -201,11 +201,15 @@ def main(args):
         print(f'Training variables: seq_len:{seq_len}; seed:{seed}')
 
         # load data
+        # make sure the percentage of repeating data points is indeed a percentage
+        assert(args.repeat < 1)
         seq = load_sequence_mnist(seed, seq_len, order=order, binary=binary).to(device)
-        seq = seq.reshape((seq_len, input_size)) # seq_lenx784
 
+        # if we want to have repeating digits
         if args.repeat > 0:
-            seq = replace_images(seq, seed=seed, N=args.repeat)
+            seq = replace_images(seq, seed=seed, p=args.repeat)
+
+        seq = seq.reshape((seq_len, input_size)) # seq_lenx784
 
         # temporal PC
         pc = SingleLayertPC(input_size=input_size, nonlin='linear').to(device)
@@ -214,7 +218,8 @@ def main(args):
         # HN with linear separation function
         hn = ModernAsymmetricHopfieldNetwork(input_size, sep=sep, beta=beta).to(device)
 
-        PATH = os.path.join(model_path, f'PC_len{seq_len}_seed{seed}_{args.data_type}_repeat{args.repeat}.pt')
+        # PATH = os.path.join(model_path, f'PC_len{seq_len}_seed{seed}_{args.data_type}_repeat{int(args.repeat*100)}percen.pt')
+        PATH = os.path.join(model_path, f'PC_len{seq_len}_seed{seed}_{args.data_type}.pt')
         if mode == 'train':
             # training PC
             # note that there is no need to train MAHN - we can just write down the retrieval
@@ -252,26 +257,26 @@ def main(args):
             memory but which can be totally wrong
             """
             
-            PC_SSIM, HN_SSIM = 0, 0
-            for k in range(seq_len):
-                PC_SSIM += float(ssim(to_np(seq[k]), to_np(PC_recall[k]))) / seq_len
-                HN_SSIM += float(ssim(to_np(seq[k]), to_np(HN_recall[k]))) / seq_len
-            PC_SSIMs.append(PC_SSIM)
-            HN_SSIMs.append(HN_SSIM)
+            # PC_SSIM, HN_SSIM = 0, 0
+            # for k in range(seq_len):
+            #     PC_SSIM += float(ssim(to_np(seq[k]), to_np(PC_recall[k]))) / seq_len
+            #     HN_SSIM += float(ssim(to_np(seq[k]), to_np(HN_recall[k]))) / seq_len
+            # PC_SSIMs.append(PC_SSIM)
+            # HN_SSIMs.append(HN_SSIM)
 
     # save everything at this particular seed
     if mode == 'recall':
         results = {}
         results["PC"] = PC_MSEs
         results["HN"] = HN_MSEs
-        json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{query_type}_data{args.data_type}.json", 'w'))
+        json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{query_type}_data{args.data_type}_repeat{int(args.repeat*100)}percen.json", 'w'))
 
         # save ssim
-        ssims = {}
-        ssims["PC"] = PC_SSIMs
-        ssims["HN"] = HN_SSIMs
-        print(ssims)
-        json.dump(ssims, open(num_path + f"/SSIMs_seed{seed}_query{query_type}_data{args.data_type}.json", 'w'))
+        # ssims = {}
+        # ssims["PC"] = PC_SSIMs
+        # ssims["HN"] = HN_SSIMs
+        # print(ssims)
+        # json.dump(ssims, open(num_path + f"/SSIMs_seed{seed}_query{query_type}_data{args.data_type}.json", 'w'))
 
 if __name__ == "__main__":
     for s in args.seed:

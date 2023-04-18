@@ -37,12 +37,12 @@ parser.add_argument('--seq-len-max', type=int, default=11,
 parser.add_argument('--seed', type=int, default=[1], nargs='+',
                     help='seed for model init (default: 1); can be multiple, separated by space')
 parser.add_argument('--latent-size', type=int, default=480,
-                    help='hidden size for training (default: 256)')
+                    help='hidden size for training 480 for mnist; 1900 for cifar10')
 # parser.add_argument('--input-size', type=int, default=784,
 #                     help='input size for training (default: 10)')
 parser.add_argument('--lr', type=float, default=1e-4,
                     help='learning rate for PC')
-parser.add_argument('--epochs', type=int, default=100,
+parser.add_argument('--epochs', type=int, default=200,
                     help='number of epochs to train (default: 100)')
 parser.add_argument('--nonlinearity', type=str, default='tanh',
                     help='nonlinear function used in the model')
@@ -53,6 +53,8 @@ parser.add_argument('--query', type=str, default='online', choices=['online', 'o
                         offline means query with the predictions')
 parser.add_argument('--data', type=str, default='mnist', choices=['mnist', 'cifar'],
                     help='which dataset to memorize')
+parser.add_argument('--repeat', type=float, default=0,
+                    help='percentage of repeating digits')
 args = parser.parse_args()
 
 
@@ -123,7 +125,7 @@ def _plot_recalls(recall, args):
         ax[j].imshow(img, cmap='gray_r')
         ax[j].axis('off')
     plt.tight_layout()
-    plt.savefig(fig_path + f'/mtPC_len{seq_len}_query{args.query}_{args.data}')
+    plt.savefig(fig_path + f'/mtPC_len{seq_len}_query{args.query}_{args.data}_repeat{int(args.repeat*100)}percen', dpi=150)
 
 def _plot_memory(x, args):
     seq_len = x.shape[0]
@@ -138,7 +140,7 @@ def _plot_memory(x, args):
         ax[j].imshow(img, cmap='gray_r')
         ax[j].axis('off')
     plt.tight_layout()
-    plt.savefig(fig_path + f'/memory_len{seq_len}_{args.data}')
+    plt.savefig(fig_path + f'/memory_len{seq_len}_{args.data}_repeat{int(args.repeat*100)}percen', dpi=150)
 
 def _plot_PC_loss(loss, seq_len, learn_iters, dataset):
     # plotting loss for tunning; temporary
@@ -168,24 +170,38 @@ def main(args):
     inf_lr = 1e-2
 
     MSEs = []
-    seq_lens = [2 ** pow for pow in range(5, seq_len_max)]
+    seq_lens = [2 ** pow for pow in range(1, seq_len_max)]
     for seq_len in seq_lens:
-        if seq_len == 16:
-            learn_lr /= 2
-        if seq_len == 32:
-            learn_lr /= 2
-        if seq_len == 128:
-            learn_lr /= 2
-        if seq_len == 512:
-            learn_lr /= 2
+
+        if dataset == 'cifar':
+            if seq_len == 16:
+                learn_lr /= 2
+            if seq_len == 32:
+                learn_lr /= 2
+            if seq_len == 128:
+                learn_lr /= 2
+            if seq_len == 512:
+                learn_lr /= 2
+                
+        elif dataset == 'mnist':
+            if seq_len == 64:
+                learn_lr /= 2
+            if seq_len == 256:
+                learn_lr /= 2
+            if seq_len == 512:
+                learn_lr /= 2
 
         print(f'Training variables: seq_len:{seq_len}; seed:{seed}; lr:{learn_lr}')
 
         # load data
         if dataset == 'mnist':
-            seq = load_sequence_mnist(seed, seq_len, order=False).to(device)
+            seq = load_sequence_mnist(seed, seq_len, order=False, binary=False).to(device)
         elif dataset == 'cifar':
             seq = load_sequence_cifar(seed, seq_len).to(device)
+
+        # if we want to have repeating digits
+        if args.repeat > 0:
+            seq = replace_images(seq, seed=seed, p=args.repeat)
         seq = seq.reshape((seq_len, input_size)) # seq_lenx784
         
         # multilayer PC
@@ -193,7 +209,7 @@ def main(args):
         optimizer = torch.optim.Adam(model.parameters(), lr=learn_lr)
 
         # path to save model to/load model from
-        PATH = os.path.join(model_path, f'PC_len{seq_len}_seed{seed}_{dataset}.pt')
+        PATH = os.path.join(model_path, f'PC_len{seq_len}_seed{seed}_{dataset}_repeat{int(args.repeat*100)}percen.pt')
 
         if mode == 'train':
             # train PC
@@ -207,6 +223,9 @@ def main(args):
             model.load_state_dict(torch.load(PATH, map_location=torch.device(device)))
             model.eval()
 
+            # slighlt increase the inferenc iters during retrieval
+            inf_iters = 200
+
             with torch.no_grad():
                 recalls = _recall(model, seq, inf_iters, inf_lr, args, device)
 
@@ -219,7 +238,7 @@ def main(args):
     if mode == 'recall':
         results = {}
         results["PC"] = MSEs
-        json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{args.query}_{args.data}.json", 'w'))
+        json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{args.query}_{args.data}_repeat{int(args.repeat*100)}percen.json", 'w'))
 
 if __name__ == "__main__":
     for s in args.seed:
