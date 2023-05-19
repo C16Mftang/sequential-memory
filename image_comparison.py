@@ -46,6 +46,8 @@ parser.add_argument('--lr', type=float, default=2e-5,
                     help='learning rate for PC')
 parser.add_argument('--epochs', type=int, default=200,
                     help='number of epochs to train (default: 200)')
+parser.add_argument('--nonlinearity', type=str, default='tanh',
+                    help='nonlinear function used in the model')
 parser.add_argument('--HN-type', type=str, default='softmax',
                     help='type of MAHN default to softmax')
 parser.add_argument('--query', type=str, default='online', choices=['online', 'offline'],
@@ -136,8 +138,10 @@ def _plot_recalls(recall, model_name, args):
     for j in range(seq_len):
         ax[j].imshow(to_np(recall[j].reshape((3, 32, 32)).permute(1, 2, 0)))
         ax[j].axis('off')
-    plt.tight_layout()
-    plt.savefig(fig_path + f'/{model_name}_len{seq_len}_query{args.query}')
+        ax[j].set_aspect("auto")
+    # plt.tight_layout()
+    plt.subplots_adjust(wspace=0, hspace=0)
+    plt.savefig(fig_path + f'/{model_name}_len{seq_len}_query{args.query}', bbox_inches='tight', dpi=200)
 
 def _plot_memory(x, seed):
     seq_len = x.shape[0]
@@ -145,8 +149,10 @@ def _plot_memory(x, seed):
     for j in range(seq_len):
         ax[j].imshow(to_np(x[j].reshape((3, 32, 32)).permute(1, 2, 0)))
         ax[j].axis('off')
-    plt.tight_layout()
-    plt.savefig(fig_path + f'/memory_len{seq_len}_seed{seed}')
+        ax[j].set_aspect("auto")
+    # plt.tight_layout()
+    plt.subplots_adjust(wspace=0, hspace=0)
+    plt.savefig(fig_path + f'/memory_len{seq_len}_seed{seed}', bbox_inches='tight', dpi=200)
 
 def _plot_PC_loss(loss, seq_len, learn_iters):
     # plotting loss for tunning; temporary
@@ -173,36 +179,43 @@ def main(args):
     query_type = args.query
     mode = args.mode
     beta = args.beta
+    nonlin = args.nonlinearity
 
     # loop through different seq_len
     PC_MSEs, HN_MSEs = [], []
 
     seq_lens = [2 ** pow for pow in range(1, seq_len_max)]
+    # seq_lens = [10]
     for seq_len in seq_lens:
 
         if seq_len == 128:
             learn_iters += 200
         if seq_len == 256:
             learn_iters += 200
-        if seq_len == 256:
+        if seq_len == 512:
             learn_iters += 200
+            learn_lr += 1e-5
         if seq_len == 1024:
             learn_iters += 200
+            learn_lr += 1e-5
 
-        print(f'Training variables: seq_len:{seq_len}; seed:{seed}')
+        print(f'Training variables: seq_len:{seq_len}; seed:{seed}; lr:{learn_lr}; epoch:{learn_iters}')
 
         # load data
         seq = load_sequence_cifar(seed, seq_len).to(device)
         seq = seq.reshape((seq_len, input_size)) # seq_lenx3072
 
         # temporal PC
-        pc = SingleLayertPC(input_size=input_size, nonlin='linear').to(device)
+        pc = SingleLayertPC(input_size=input_size, nonlin=nonlin).to(device)
         optimizer = torch.optim.Adam(pc.parameters(), lr=learn_lr)
 
         # HN with linear separation function
         hn = ModernAsymmetricHopfieldNetwork(input_size, sep=sep, beta=beta).to(device)
 
-        PATH = os.path.join(model_path, f'PC_len{seq_len}_seed{seed}.pt')
+        if nonlin != 'linear':
+            PATH = os.path.join(model_path, f'PC_{nonlin}_len{seq_len}_seed{seed}.pt') 
+        else:
+            PATH = os.path.join(model_path, f'PC_len{seq_len}_seed{seed}.pt') 
         if mode == 'train':
             # training PC
             # note that there is no need to train MAHN - we can just write down the retrieval
@@ -220,8 +233,9 @@ def main(args):
                 PC_recall = _pc_recall(pc, seq, query_type, device)
                 HN_recall = _hn_recall(hn, seq, query_type, device)
 
-            if seq_len <= 16:
-                _plot_recalls(PC_recall, 'PC', args)
+            if seq_len <= 32:
+                PC_name = f'PC_{nonlin}' if nonlin != 'linear' else 'PC'
+                _plot_recalls(PC_recall, PC_name, args)
                 HN_name = f'HN{sep}beta{beta}' if sep == 'softmax' else f'HN{sep}'
                 _plot_recalls(HN_recall, HN_name, args)
 
@@ -238,10 +252,12 @@ def main(args):
         results["PC"] = PC_MSEs
         results["HN"] = HN_MSEs
         print(results)
-        json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{query_type}.json", 'w'))
+        json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{query_type}_{nonlin}.json", 'w'))
 
 
 if __name__ == "__main__":
     for s in args.seed:
+        start_time = time.time()
         args.seed = s
         main(args)
+        print(f'Seed complete, total time: {time.time() - start_time}')
