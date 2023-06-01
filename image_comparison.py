@@ -57,80 +57,9 @@ parser.add_argument('--mode', type=str, default='train', choices=['train', 'reca
                     help='mode of the script: train or recall (just to save time)')
 parser.add_argument('--beta', type=int, default=1,
                     help='beta value for the MCHN')
+parser.add_argument('--data-type', type=str, default='continuous', choices=['binary', 'continuous'],
+                    help='for cifar/imagenet data this should always be continuous')
 args = parser.parse_args()
-
-
-def train_PC(pc, optimizer, seq, learn_iters, device):
-    seq_len = seq.shape[0]
-    losses = []
-    start_time = time.time()
-    for learn_iter in range(learn_iters):
-        epoch_loss = 0
-        prev = pc.init_hidden(1).to(device)
-        batch_loss = 0
-        for k in range(seq_len):
-            x = seq[k]
-            optimizer.zero_grad()
-            energy = pc.get_energy(x, prev)
-            energy.backward()
-            optimizer.step()
-            prev = x.clone().detach()
-
-            # add up the loss value at each time step
-            epoch_loss += energy.item() / seq_len
-        losses.append(epoch_loss)
-        if (learn_iter + 1) % 10 == 0:
-            print(f'Epoch {learn_iter+1}, loss {epoch_loss}')
-
-    print(f'training PC complete, time: {time.time() - start_time}')
-    return losses
-
-def _pc_recall(model, seq, query_type, device, binary=False):
-    """recall function for pc
-    
-    seq: PxN sequence
-    mode: online or offline
-    binary: true or false
-
-    output: (P-1)xN recall of sequence (starting from the second step)
-    """
-    seq_len, N = seq.shape
-    recall = torch.zeros((seq_len, N)).to(device)
-    recall[0] = seq[0].clone().detach()
-    if query_type == 'online':
-        # recall using true image at each step
-        recall[1:] = torch.sign(model(seq[:-1])) if binary else model(seq[:-1])
-    else:
-        # recall using predictions from previous step
-        prev = seq[0].clone().detach() # 1xN
-        for k in range(1, seq_len):
-            recall[k] = torch.sign(model(recall[k-1:k])) if binary else model(recall[k-1:k]) # 1xN
-
-    return recall
-    
-def _hn_recall(model, seq, query_type, device, binary=False):
-    """recall function for pc
-    
-    seq: PxN sequence
-    mode: online or offline
-    binary: true or false
-
-    output: (P-1)xN recall of sequence (starting from the second step)
-    """
-    seq_len, N = seq.shape
-    recall = torch.zeros((seq_len, N)).to(device)
-    recall[0] = seq[0].clone().detach()
-    if query_type == 'online':
-        # recall using true image at each step
-        recall[1:] = torch.sign(model(seq, seq[:-1])) if binary else model(seq, seq[:-1]) # (P-1)xN
-    else:
-        # recall using predictions from previous step
-        prev = seq[0].clone().detach() # 1xN
-        for k in range(1, seq_len):
-            # prev = torch.sign(model(seq, prev)) if binary else model(seq, prev) # 1xN
-            recall[k] = torch.sign(model(seq, recall[k-1:k])) if binary else model(seq, recall[k-1:k]) # 1xN
-
-    return recall
 
 def _plot_recalls(recall, model_name, args):
     seq_len = recall.shape[0]
@@ -219,7 +148,7 @@ def main(args):
         if mode == 'train':
             # training PC
             # note that there is no need to train MAHN - we can just write down the retrieval
-            PC_losses = train_PC(pc, optimizer, seq, learn_iters, device)
+            PC_losses = train_singlelayer_tPC(pc, optimizer, seq, learn_iters, device)
             # save the PC model for later recall - because training PC is exhausting
             torch.save(pc.state_dict(), PATH)
             _plot_PC_loss(PC_losses, seq_len, learn_iters)
@@ -230,8 +159,8 @@ def main(args):
             pc.eval()
 
             with torch.no_grad():
-                PC_recall = _pc_recall(pc, seq, query_type, device)
-                HN_recall = _hn_recall(hn, seq, query_type, device)
+                PC_recall = singlelayer_recall(pc, seq, device, args)
+                HN_recall = hn_recall(hn, seq, device, args)
 
             if seq_len <= 32:
                 PC_name = f'PC_{nonlin}' if nonlin != 'linear' else 'PC'
