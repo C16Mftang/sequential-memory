@@ -45,6 +45,8 @@ parser.add_argument('--lr', type=float, default=1e-4,
                     help='learning rate for PC')
 parser.add_argument('--epochs', type=int, default=200,
                     help='number of epochs to train (default: 200)')
+parser.add_argument('--nonlinearity', type=str, default='linear',
+                    help='nonlinear function used in the model')
 parser.add_argument('--HN-type', type=str, default='softmax',
                     help='type of MAHN default to softmax')
 parser.add_argument('--data-type', type=str, default='continuous', choices=['binary', 'continuous'],
@@ -108,6 +110,7 @@ def main(args):
     beta = args.beta
     binary = True if args.data_type == 'binary' else False
     order = True if args.order == 'order' else False
+    nonlin = args.nonlinearity
 
     # loop through different seq_len
     PC_MSEs = []
@@ -139,7 +142,7 @@ def main(args):
         seq = seq.reshape((seq_len, input_size)) # seq_lenx784
 
         # temporal PC
-        pc = SingleLayertPC(input_size=input_size, nonlin='linear').to(device)
+        pc = SingleLayertPC(input_size=input_size, nonlin=nonlin).to(device)
         optimizer = torch.optim.Adam(pc.parameters(), lr=learn_lr)
 
         # HN with linear separation function
@@ -208,5 +211,7 @@ def main(args):
 
 if __name__ == "__main__":
     for s in args.seed:
+        start_time = time.time()
         args.seed = s
         main(args)
+        print(f'Seed complete, total time: {time.time() - start_time}')
