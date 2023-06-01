@@ -66,8 +66,14 @@ parser.add_argument('--beta', type=int, default=1,
                     help='beta value for the MCHN')
 args = parser.parse_args()
 
-
 def train_batched_input(model, optimizer, loader, learn_iters, inf_iters, inf_lr, device, nlayer=2):
+    """
+    Function to train tPC with batched inputs;
+
+    Since current only this file is using this function, we will keep it here.
+
+    In the future, explorations with rotating images will also need this
+    """
     losses = []
     start_time = time.time()
     for learn_iter in range(learn_iters):
@@ -207,23 +213,27 @@ def _plot_PC_loss(loss, sample_size, learn_iters, name):
 
 def _plot_recalls(recall, test_size, args, name, sample_size):
     seq_len = recall.shape[1]
-    fig, ax = plt.subplots(test_size, seq_len, figsize=(seq_len, test_size))
+    fig, ax = plt.subplots(test_size, seq_len, figsize=(seq_len-2, test_size))
     for i in range(test_size):
         for j in range(seq_len):
             ax[i, j].imshow(to_np(recall[i, j].reshape(32, 32)), cmap='gray')
             ax[i, j].axis('off')
-    plt.tight_layout()
-    plt.savefig(fig_path + f'/{name}_size{sample_size}_{args.query}', dpi=200)
+            ax[i, j].set_aspect("auto")
+    plt.subplots_adjust(wspace=0, hspace=0.1)
+    # plt.tight_layout()
+    plt.savefig(fig_path + f'/{name}_size{sample_size}_{args.query}', bbox_inches='tight', dpi=200)
 
 def _plot_memory(x, test_size, args, sample_size):
     seq_len = x.shape[1]
-    fig, ax = plt.subplots(test_size, seq_len, figsize=(seq_len, test_size))
+    fig, ax = plt.subplots(test_size, seq_len, figsize=(seq_len-2, test_size))
     for i in range(test_size):
         for j in range(seq_len):
             ax[i, j].imshow(to_np(x[i, j].reshape(32, 32)), cmap='gray')
             ax[i, j].axis('off')
-    plt.tight_layout()
-    plt.savefig(fig_path + f'/memory_size{sample_size}', dpi=200)
+            ax[i, j].set_aspect("auto")
+    plt.subplots_adjust(wspace=0, hspace=0.1)
+    # plt.tight_layout()
+    plt.savefig(fig_path + f'/memory_size{sample_size}', bbox_inches='tight', dpi=200)
 
 def main(args):
     # hyper parameters
@@ -262,31 +272,38 @@ def main(args):
         m_optimizer = torch.optim.Adam(mpc.parameters(), lr=learn_lr)
 
         # MCHN 
-        hn = ModernAsymmetricHopfieldNetwork(input_size, sep='softmax', beta=5).to(device)
+        hn = ModernAsymmetricHopfieldNetwork(input_size, sep='softmax', beta=args.beta).to(device)
 
         if mode == 'train single':
             # training single layer tPC
             sPC_losses = train_batched_input(spc, s_optimizer, loader, learn_iters, inf_iters, inf_lr, device, nlayer=1)
-            torch.save(spc.state_dict(), os.path.join(model_path, f'sPC_size{sample_size}_seed{seed}.pt'))
-            _plot_PC_loss(sPC_losses, sample_size, learn_iters, "sPC")
+            torch.save(spc.state_dict(), os.path.join(model_path, f'sPC_{nonlin}_size{sample_size}_seed{seed}.pt'))
+            _plot_PC_loss(sPC_losses, sample_size, learn_iters, f"sPC_{nonlin}")
 
         elif mode == 'train multi':
             # training 2-layer tPC
             mPC_losses = train_batched_input(mpc, m_optimizer, loader, learn_iters, inf_iters, inf_lr, device, nlayer=2)
-            torch.save(mpc.state_dict(), os.path.join(model_path, f'mPC_size{sample_size}_seed{seed}.pt'))
-            _plot_PC_loss(mPC_losses, sample_size, learn_iters, "mPC")
+            torch.save(mpc.state_dict(), os.path.join(model_path, f'mPC_{nonlin}_size{sample_size}_seed{seed}.pt'))
+            _plot_PC_loss(mPC_losses, sample_size, learn_iters, f"mPC_{nonlin}")
 
         elif mode == 'recall':
             # spc
-            spc.load_state_dict(torch.load(os.path.join(model_path, f'sPC_size{sample_size}_seed{seed}.pt'), 
+            if nonlin != 'linear':
+                path = os.path.join(model_path, f'sPC_{nonlin}_size{sample_size}_seed{seed}.pt')
+            else:
+                path = os.path.join(model_path, f'sPC_size{sample_size}_seed{seed}.pt')
+            spc.load_state_dict(torch.load(path, 
                                         map_location=torch.device(device)))
             spc.eval()
 
             # mpc
-            mpc.load_state_dict(torch.load(os.path.join(model_path, f'mPC_size{sample_size}_seed{seed}.pt'), 
+            if nonlin != 'linear':
+                path = os.path.join(model_path, f'mPC_{nonlin}_size{sample_size}_seed{seed}.pt')
+            else:
+                path = os.path.join(model_path, f'mPC_size{sample_size}_seed{seed}.pt')
+            mpc.load_state_dict(torch.load(path, 
                                            map_location=torch.device(device)))
             mpc.eval()
-
 
             # load the whole dataset 
             memories = []
@@ -301,7 +318,7 @@ def main(args):
             s_recalls = torch.zeros_like(memories)
             m_recalls = torch.zeros_like(memories)
             hn_recalls = torch.zeros_like(memories)
-
+            
             with torch.no_grad():
                 for i in range(sample_size):
                     memory = memories[i]
@@ -309,9 +326,9 @@ def main(args):
                     m_recalls[i] = _pc_recall(mpc, memory, inf_iters, inf_lr, args, device, nlayer=2)
                     hn_recalls[i] = _hn_recall(hn, memory, memories, device, args)
 
-            if sample_size == 50:
-                _plot_recalls(s_recalls, test_size, args, 'spc', sample_size)
-                _plot_recalls(m_recalls, test_size, args, 'mpc', sample_size)
+            if sample_size == 20:
+                _plot_recalls(s_recalls, test_size, args, f'spc_{nonlin}', sample_size)
+                _plot_recalls(m_recalls, test_size, args, f'mpc_{nonlin}', sample_size)
                 _plot_recalls(hn_recalls, test_size, args, 'hn', sample_size)
                 _plot_memory(memories, test_size, args, sample_size)
 
@@ -325,10 +342,8 @@ def main(args):
         results["sPC"] = sPC_MSEs
         results["mPC"] = mPC_MSEs
         results["HN"] = HN_MSEs
-        json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{args.query}.json", 'w'))
+        json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{args.query}_{nonlin}.json", 'w'))
             
-
-
 if __name__ == "__main__":
     for s in args.seed:
         start_time = time.time()
