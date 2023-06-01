@@ -144,19 +144,5 @@ def main(args):
 if __name__ == "__main__":
     main(args)
 
-# plt.figure(figsize=(4, 3))
-# # plt.plot(Ns, Ns, label='Identity', c='k', ls='--', marker='o')
-# plt.plot(bs, Pmaxs_pc, label='PC', marker='o')
-# plt.plot(bs, Pmaxs_1, label='HN (d=1)', marker='o', c='#13678A')
-# plt.plot(bs, Pmaxs_2, label='HN (d=2)', marker='o', c='#45C4B0')
-# plt.yscale("log")
-# plt.legend(prop={'size': 8})
-# plt.title('Capacity of models')
-# plt.xlabel(r'$b=|\sqrt{corr}|$')
-# plt.ylabel(r'$P_{max}$')
-# plt.xticks(bs, bs)
-# plt.tight_layout()
-# plt.savefig(result_path + f'/Capacity_correlated', dpi=200)
-
 
 

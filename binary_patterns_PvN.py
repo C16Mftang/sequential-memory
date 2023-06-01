@@ -146,19 +146,5 @@ def main(args):
 if __name__ == "__main__":
     main(args)
 
-# plt.figure(figsize=(4, 3))
-# # plt.plot(Ns, Ns, label='Identity', c='k', ls='--', marker='o')
-# plt.plot(Ns, Pmaxs_pc, label='PC', marker='o')
-# plt.plot(Ns, Pmaxs_1, label='HN (d=1)', marker='o', c='#13678A')
-# # plt.plot(Ns, Pmaxs_2, label='HN (d=2)', marker='o', c='#45C4B0')
-# plt.yscale("log")
-# plt.legend(prop={'size': 8})
-# plt.title(r'Model capacity with different $N$\'s')
-# plt.xlabel(r'$N$')
-# plt.ylabel(r'$P_{max}$')
-# plt.xticks(Ns, Ns)
-# plt.tight_layout()
-# plt.savefig(result_path + f'/Capacity_long.pdf')
-
 
 
