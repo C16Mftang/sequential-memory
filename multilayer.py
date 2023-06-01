@@ -1,3 +1,5 @@
+"""A simple example of how to train a 2-layer tPC without any comparison to HNs"""
+
 import os
 import argparse
 import json
@@ -8,7 +10,7 @@ import numpy as np
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 plt.style.use('ggplot')
-from src.models import TemporalPC, MultilayertPC
+from src.models import MultilayertPC
 from src.utils import *
 from src.get_data import *
 
@@ -38,8 +40,6 @@ parser.add_argument('--seed', type=int, default=[1], nargs='+',
                     help='seed for model init (default: 1); can be multiple, separated by space')
 parser.add_argument('--latent-size', type=int, default=480,
                     help='hidden size for training 480 for mnist; 1900 for cifar10')
-# parser.add_argument('--input-size', type=int, default=784,
-#                     help='input size for training (default: 10)')
 parser.add_argument('--lr', type=float, default=1e-4,
                     help='learning rate for PC')
 parser.add_argument('--epochs', type=int, default=200,
@@ -56,61 +56,6 @@ parser.add_argument('--data', type=str, default='mnist', choices=['mnist', 'cifa
 parser.add_argument('--repeat', type=float, default=0,
                     help='percentage of repeating digits')
 args = parser.parse_args()
-
-
-def train_PC(model, optimizer, seq, learn_iters, inf_iters, inf_lr, device):
-    seq_len = seq.shape[0]
-    losses = []
-    start_time = time.time()
-    for learn_iter in range(learn_iters):
-        epoch_loss = 0
-        prev_z = model.init_hidden(1).to(device)
-        for k in range(seq_len):
-            x = seq[k].clone().detach()
-            optimizer.zero_grad()
-            model.inference(inf_iters, inf_lr, x, prev_z)
-            energy = model.update_grads(x, prev_z)
-            energy.backward()
-            optimizer.step()
-            prev_z = model.z.clone().detach()
-
-            # add up the loss value at each time step
-            epoch_loss += energy.item() / seq_len
-
-        losses.append(epoch_loss)
-        if (learn_iter + 1) % 10 == 0:
-            print(f'Epoch {learn_iter+1}, loss {epoch_loss}')
-        
-    print(f'training PC complete, time: {time.time() - start_time}')
-    return losses
-
-def _recall(model, seq, inf_iters, inf_lr, args, device):
-    seq_len, N = seq.shape
-    recall = torch.zeros((seq_len, N)).to(device)
-    recall[0] = seq[0].clone().detach()
-    prev_z = model.init_hidden(1).to(device)
-
-    if args.query == 'online':
-        # infer the latent state at each time step, given correct previous input
-        for k in range(seq_len-1):
-            x = seq[k].clone().detach()
-            model.inference(inf_iters, inf_lr, x, prev_z)
-            prev_z = model.z.clone().detach()
-            _, pred_x = model(prev_z)
-            recall[k+1] = pred_x
-
-    elif args.query == 'offline':
-        # only infer the latent of the cue, then forward pass
-        x = seq[0].clone().detach()
-        model.inference(inf_iters, inf_lr, x, prev_z)
-        prev_z = model.z.clone().detach()
-
-        # fast forward pass
-        for k in range(1, seq_len):
-            prev_z, pred_x = model(prev_z)
-            recall[k] = pred_x
-
-    return recall
 
 def _plot_recalls(recall, args):
     seq_len = recall.shape[0]
@@ -149,7 +94,6 @@ def _plot_PC_loss(loss, seq_len, learn_iters, dataset):
     plt.legend()
     plt.savefig(fig_path + f'/losses_len{seq_len}_iters{learn_iters}_{dataset}')
         
-
 def main(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(device)
@@ -159,7 +103,6 @@ def main(args):
     learn_iters = args.epochs
     learn_lr = args.lr
     latent_size = args.latent_size
-    # input_size = args.input_size
     seed = args.seed
     mode = args.mode
     dataset = args.data
@@ -172,7 +115,8 @@ def main(args):
     MSEs = []
     seq_lens = [2 ** pow for pow in range(1, seq_len_max)]
     for seq_len in seq_lens:
-
+        
+        # varying lr for different datasets
         if dataset == 'cifar':
             if seq_len == 16:
                 learn_lr /= 2
@@ -198,11 +142,12 @@ def main(args):
             seq = load_sequence_mnist(seed, seq_len, order=False, binary=False).to(device)
         elif dataset == 'cifar':
             seq = load_sequence_cifar(seed, seq_len).to(device)
+        # ...or any other custom dataset
 
         # if we want to have repeating digits
         if args.repeat > 0:
             seq = replace_images(seq, seed=seed, p=args.repeat)
-        seq = seq.reshape((seq_len, input_size)) # seq_lenx784
+        seq = seq.reshape((seq_len, input_size))
         
         # multilayer PC
         model = MultilayertPC(latent_size, input_size, nonlin='tanh').to(device)
@@ -213,7 +158,7 @@ def main(args):
 
         if mode == 'train':
             # train PC
-            PC_losses = train_PC(model, optimizer, seq, learn_iters, inf_iters, inf_lr, device)
+            PC_losses = train_multilayer_tPC(model, optimizer, seq, learn_iters, inf_iters, inf_lr, device)
             # save the current model and plot the loss for tunning
             torch.save(model.state_dict(), PATH)
             _plot_PC_loss(PC_losses, seq_len, learn_iters, dataset)
@@ -227,7 +172,7 @@ def main(args):
             inf_iters = 200
 
             with torch.no_grad():
-                recalls = _recall(model, seq, inf_iters, inf_lr, args, device)
+                recalls = multilayer_recall(model, seq, inf_iters, inf_lr, args, device)
 
             if seq_len <= 16:
                 _plot_recalls(recalls, args)
@@ -242,5 +187,7 @@ def main(args):
 
 if __name__ == "__main__":
     for s in args.seed:
+        start_time = time.time()
         args.seed = s
         main(args)
+        print(f'Seed complete, total time: {time.time() - start_time}')
