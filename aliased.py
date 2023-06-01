@@ -1,3 +1,7 @@
+"""
+Code for studying MNIST sequences with aliased inputs
+"""
+
 import os
 import argparse
 import json
@@ -193,5 +197,7 @@ def main(args):
 
 if __name__ == "__main__":
     for s in args.seed:
+        start_time = time.time()
         args.seed = s
         main(args)
+        print(f'{args.mode} finishes, total time elapsed:{time.time() - start_time}')

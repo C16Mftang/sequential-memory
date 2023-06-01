@@ -1,6 +1,6 @@
 """
 This code compares the performance of tPC, AHN (with different separation function)
-on a random MNIST sequence of length seq_len
+on a random CIFAR10/IMAGENET sequence
 """
 
 import os

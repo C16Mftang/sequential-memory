@@ -1,3 +1,8 @@
+"""
+This code compares the performance of tPC, AHN (with different separation function)
+on multiple MovingMNIST sequences
+"""
+
 import os
 import json
 import argparse
