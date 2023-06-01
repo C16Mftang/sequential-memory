@@ -43,16 +43,15 @@ parser.add_argument('--lr', type=float, default=1e-5,
                     help='learning rate for PC')
 parser.add_argument('--epochs', type=int, default=200,
                     help='number of epochs to train (default: 200)')
-# parser.add_argument('--nonlinearity', type=str, default='tanh',
-#                     help='nonlinear function used in the model')
+parser.add_argument('--nonlinearity', type=str, default='tanh',
+                    help='nonlinear function used in the model')
 parser.add_argument('--mode', type=str, default='train', choices=['train', 'recall', 'PCA'],
                     help='mode of the script: train or recall (just to save time)')
 parser.add_argument('--query', type=str, default='offline', choices=['online', 'offline'],
                     help='how you query the recall; online means query with true memory at each time, \
                         offline means query with the predictions')
 parser.add_argument('--data-type', type=str, default='continuous', choices=['binary', 'continuous'],
-                    help='type of data; note that when HN type is exp or softmax, \
-                        this should be always continuous')
+                    help='for movie data from UCF101 this should always be continuous')
 parser.add_argument('--sport', type=str, default='cliff-diving',
                     help='sports used to memorize')
 args = parser.parse_args()
@@ -87,8 +86,10 @@ def _plot_recalls(recall, model_name, args):
     for j in range(seq_len):
         ax[j].imshow(to_np(recall[j].reshape((3, 64, 64)).permute(1, 2, 0)))
         ax[j].axis('off')
-    plt.tight_layout()
-    plt.savefig(fig_path + f'/{model_name}_len{seq_len}_query{args.query}', dpi=200)
+        ax[j].set_aspect("auto")
+    # plt.tight_layout()
+    plt.subplots_adjust(wspace=0, hspace=0)
+    plt.savefig(fig_path + f'/{model_name}_len{seq_len}_query{args.query}', bbox_inches='tight', dpi=200)
 
 def _plot_memory(x):
     seq_len = x.shape[0]
@@ -96,8 +97,10 @@ def _plot_memory(x):
     for j in range(seq_len):
         ax[j].imshow(to_np(x[j].reshape((3, 64, 64)).permute(1, 2, 0)))
         ax[j].axis('off')
-    plt.tight_layout()
-    plt.savefig(fig_path + f'/memory_len{seq_len}', dpi=200)
+        ax[j].set_aspect("auto")
+    # plt.tight_layout()
+    plt.subplots_adjust(wspace=0, hspace=0)
+    plt.savefig(fig_path + f'/memory_len{seq_len}', bbox_inches='tight', dpi=200)
 
 def _plot_PC_loss(loss, seq_len, learn_iters, name):
     # plotting loss for tunning; temporary
@@ -118,7 +121,7 @@ def main(args):
     seed = args.seed
     mode = args.mode
     sport = args.sport
-    nonlin = 'linear'
+    nonlin = args.nonlinearity
 
     # inference variables: no need to tune too much
     inf_iters = 100
@@ -135,11 +138,11 @@ def main(args):
     seq = seq.reshape((seq_len, input_size)) # seq_lenx12288
     
     # singlelayer PC
-    spc = SingleLayertPC(input_size, nonlin='tanh').to(device)
+    spc = SingleLayertPC(input_size, nonlin=nonlin).to(device)
     s_optimizer = torch.optim.Adam(spc.parameters(), lr=learn_lr)
 
     # multilayer PC
-    mpc = MultilayertPC(latent_size, input_size, nonlin='tanh').to(device)
+    mpc = MultilayertPC(latent_size, input_size, nonlin=nonlin).to(device)
     m_optimizer = torch.optim.Adam(mpc.parameters(), lr=learn_lr)
 
     # MCHN 
@@ -147,25 +150,25 @@ def main(args):
 
     if mode == 'train':
         # train sPC
-        # print('Training single layer tPC')
-        # sPC_losses = train_singlelayer_tPC(spc, s_optimizer, seq, learn_iters, device)
-        # torch.save(spc.state_dict(), os.path.join(model_path, f'sPC_{sport}_len{seq_len}_seed{seed}.pt'))
-        # _plot_PC_loss(sPC_losses, seq_len, learn_iters, f"spc_{sport}")
+        print('Training single layer tPC')
+        sPC_losses = train_singlelayer_tPC(spc, s_optimizer, seq, learn_iters, device)
+        torch.save(spc.state_dict(), os.path.join(model_path, f'sPC_{sport}_len{seq_len}_seed{seed}_{nonlin}.pt'))
+        _plot_PC_loss(sPC_losses, seq_len, learn_iters, f"spc_{sport}")
 
         # train mPC
         print('Training multi layer tPC')
         mPC_losses = train_multilayer_tPC(mpc, m_optimizer, seq, learn_iters, inf_iters, inf_lr, device)
-        torch.save(mpc.state_dict(), os.path.join(model_path, f'mPC_{sport}_len{seq_len}_seed{seed}.pt'))
+        torch.save(mpc.state_dict(), os.path.join(model_path, f'mPC_{sport}_len{seq_len}_seed{seed}_{nonlin}.pt'))
         _plot_PC_loss(mPC_losses, seq_len, learn_iters, f"mpc_{sport}")
     
     elif mode == 'recall':
         # spc
-        spc.load_state_dict(torch.load(os.path.join(model_path, f'sPC_{sport}_len{seq_len}_seed{seed}.pt'), 
+        spc.load_state_dict(torch.load(os.path.join(model_path, f'sPC_{sport}_len{seq_len}_seed{seed}_{nonlin}.pt'), 
                                        map_location=torch.device(device)))
         spc.eval()
 
         # mpc
-        mpc.load_state_dict(torch.load(os.path.join(model_path, f'mPC_{sport}_len{seq_len}_seed{seed}.pt'), 
+        mpc.load_state_dict(torch.load(os.path.join(model_path, f'mPC_{sport}_len{seq_len}_seed{seed}_{nonlin}.pt'), 
                                        map_location=torch.device(device)))
         mpc.eval()
 
@@ -176,12 +179,14 @@ def main(args):
             hn_recalls = hn_recall(hn, seq, device, args)
 
         if seq_len <= 16:
-            _plot_recalls(s_recalls, f"sPC_{sport}", args)
-            _plot_recalls(m_recalls, f"mPC_{sport}", args)
+            _plot_recalls(s_recalls, f"sPC_{nonlin}_{sport}", args)
+            _plot_recalls(m_recalls, f"mPC_{nonlin}_{sport}", args)
             _plot_recalls(hn_recalls, f"HN_{sport}", args)
             _plot_memory(seq)
 
 if __name__ == "__main__":
     for s in args.seed:
+        start_time = time.time()
         args.seed = s
         main(args)
+        print(f'Seed complete, total time: {time.time() - start_time}')
