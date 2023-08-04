@@ -5,10 +5,11 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
+import torchvision.transforms.functional as TF
 import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 from sklearn.decomposition import PCA
-from src.models import TemporalPC, MultilayertPC
+from src.models import MultilayertPC
 from src.utils import *
 from src.get_data import *
 
@@ -36,7 +37,7 @@ if not os.path.exists(model_path):
 parser = argparse.ArgumentParser(description='Generalization capabilities')
 parser.add_argument('--sample-size', type=int, default=1000, 
                     help='number of sequences with motion')
-parser.add_argument('--test-size', type=int, default=5, 
+parser.add_argument('--test-size', type=int, default=50, 
                     help='number of unseen sequences with motion for testing')
 parser.add_argument('--batch-size', type=int, default=500, 
                     help='training batch size')
@@ -44,13 +45,13 @@ parser.add_argument('--input-size', type=int, default=784,
                     help='input size for training (default: 784)')
 parser.add_argument('--latent-size', type=int, default=480,
                     help='hidden size for training (default: 480)')
-parser.add_argument('--seed', type=int, default=1,
+parser.add_argument('--seed', type=int, default=[1], nargs='+',
                     help='seed for model init and data sampling')
 parser.add_argument('--angle', type=int, default=20,
                     help='rotating angles for the rotational experiments')
 parser.add_argument('--lr', type=float, default=1e-4,
                     help='learning rate for PC')
-parser.add_argument('--epochs', type=int, default=100,
+parser.add_argument('--epochs', type=int, default=200,
                     help='number of epochs to train (default: 100)')
 parser.add_argument('--query', type=str, default='offline', choices=['online', 'offline'],
                     help='how you query the recall; online means query with true memory at each time, \
@@ -155,15 +156,31 @@ def _plot_PC_loss(loss, sample_size, learn_iters):
     plt.legend()
     plt.savefig(fig_path + f'/losses_size{sample_size}_iters{learn_iters}')
 
-def _plot_recalls(recall, test_size, args):
+def _plot_recalls(recall, args):
+    n_seq = 1
     seq_len = recall.shape[1]
-    fig, ax = plt.subplots(test_size, seq_len, figsize=(seq_len, test_size))
-    for i in range(test_size):
-        for j in range(seq_len):
-            ax[i, j].imshow(to_np(recall[i, j].reshape(28, 28)), cmap='gray_r')
-            ax[i, j].axis('off')
-    plt.tight_layout()
+    recall = recall.reshape((-1, 784))
+    fig, ax = plt.subplots(n_seq, seq_len, figsize=(seq_len, n_seq))
+    for i, a in enumerate(ax.flatten()):
+        a.imshow(to_np(recall[i].reshape(28, 28)), cmap='gray_r')
+        a.axis('off')
+        a.set_xticklabels([])
+        a.set_yticklabels([])
+    plt.subplots_adjust(wspace=0, hspace=0)
     plt.savefig(fig_path + f'/{args.mode}_size{args.sample_size}_{args.query}_{args.dynamic}', dpi=150)
+
+def _plot_gt(memory, args):
+    n_seq = 1
+    seq_len = memory.shape[1]
+    memory = memory.reshape((-1, 784))
+    fig, ax = plt.subplots(n_seq, seq_len, figsize=(seq_len, n_seq))
+    for i, a in enumerate(ax.flatten()):
+        a.imshow(to_np(memory[i].reshape(28, 28)), cmap='gray_r')
+        a.axis('off')
+        a.set_xticklabels([])
+        a.set_yticklabels([])
+    plt.subplots_adjust(wspace=0, hspace=0)
+    plt.savefig(fig_path + f'/gt_{args.mode}_size{args.sample_size}_{args.query}_{args.dynamic}', dpi=150)
 
 def main(args):
     # hyper parameters
@@ -181,7 +198,7 @@ def main(args):
     mode = args.mode
 
     # fix these
-    inf_iters = 100
+    inf_iters = 20
     inf_lr = 1e-2
 
     # load data
@@ -191,7 +208,7 @@ def main(args):
     model = MultilayertPC(latent_size, input_size, nonlin).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learn_lr)
 
-    PATH = os.path.join(model_path, f'PC_rotation_size{sample_size}_nonlin{nonlin}.pt')
+    PATH = os.path.join(model_path, f'PC_rotation_size{sample_size}_nonlin{nonlin}_seed{seed}.pt')
     if mode == 'train':
         # training
         PC_losses = train_batched_input(model, optimizer, loader, learn_iters, inf_iters, inf_lr, device)
@@ -205,15 +222,28 @@ def main(args):
 
         # load EMNIST
         test_data = load_sequence_emnist(48, test_size).to(device) # test_sizex28x28
-        test_data = test_data.reshape((-1, input_size)) # test_sizex784
+
+        # rotate ground truth
+        true_sequence = torch.zeros((test_size, seq_len, input_size))
+        for l in range(seq_len):
+            true_sequence[:, l] = TF.rotate(test_data, angle * l).reshape((-1, input_size))
         
+        test_data = test_data.reshape((-1, input_size)) # test_sizex784
+
+        # obtain generalization
         generalization = torch.zeros((test_size, seq_len, input_size))
         with torch.no_grad():
             for i in range(test_size):
                 cue = test_data[i] # 1x784
                 generalization[i] = _generalize(model, cue, seq_len, inf_iters, inf_lr, device)
 
-        _plot_recalls(generalization, test_size, args)
+        # visualize the generalization
+        _plot_recalls(generalization, args)
+        _plot_gt(true_sequence, args)
+
+        # save MSE
+        mse = to_np(torch.mean((true_sequence - generalization) ** 2))
+        return mse
 
     elif mode == 'recall':
         # select a few examples from the training set to recall
@@ -223,13 +253,19 @@ def main(args):
         test_data = next(iter(loader))[0][:test_size].to(device)
         test_data = test_data.reshape((test_size, seq_len, -1)) # test_size, seq_len, 784
 
-        recalls = torch.zeros((test_size, seq_len, input_size))
+        recalls = torch.zeros((test_size, seq_len, input_size)).to(device)
         with torch.no_grad():
             for i in range(test_size):
                 seq = test_data[i]
                 recalls[i] = _recall(model, seq, inf_iters, inf_lr, args, device)
 
-        _plot_recalls(recalls, test_size, args)
+        # visualize recall
+        _plot_recalls(recalls, args)
+        _plot_gt(test_data, args)
+
+        # save MSE
+        mse = to_np(torch.mean((test_data - recalls) ** 2))
+        return mse
 
     elif mode == 'PCA':
         n_pcs = 3
@@ -267,7 +303,18 @@ def main(args):
         plt.savefig(fig_path + '/PCA', dpi=150)
             
 if __name__ == "__main__":
-    main(args)
+    mses = np.zeros((len(args.seed), 1))
+    for ind, s in enumerate(args.seed):
+        start_time = time.time()
+        args.seed = s
+        if args.mode != 'train':
+            mses[ind] = main(args)
+        else:
+            main(args)
+        print(f'Seed {s} complete, total time: {time.time() - start_time}')
 
+    if args.mode != 'train':
+        print(mses)
+        # np.save(num_path + f'/{args.mode}_mses_{args.sample_size}', mses)
 
 
