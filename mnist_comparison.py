@@ -63,6 +63,8 @@ parser.add_argument('--beta', type=int, default=1,
                     help='beta value for the MCHN')
 parser.add_argument('--repeat', type=float, default=0,
                     help='percentage of repeating digits')
+parser.add_argument('--noise', type=float, default=0,
+                    help='std of noise added to the query')
 args = parser.parse_args()
 
 # local plotting functions for exploratory purposes
@@ -73,7 +75,8 @@ def _plot_recalls(recall, model_name, args):
         ax[j].imshow(to_np(recall[j].reshape(28, 28)), cmap='gray_r')
         ax[j].axis('off')
     plt.tight_layout()
-    plt.savefig(fig_path + f'/{model_name}_len{seq_len}_query{args.query}_data{args.data_type}_repeat{int(args.repeat*100)}percen', dpi=150)
+    # plt.savefig(fig_path + f'/{model_name}_len{seq_len}_query{args.query}_data{args.data_type}_repeat{int(args.repeat*100)}percen', dpi=150)
+    plt.savefig(fig_path + f'/{model_name}_len{seq_len}_query{args.query}_data{args.data_type}_noise{int(args.noise*100)}', dpi=150)
 
 def _plot_memory(x, seed, args):
     seq_len = x.shape[0]
@@ -116,7 +119,8 @@ def main(args):
     PC_MSEs = []
     HN_MSEs = []
 
-    seq_lens = [2 ** pow for pow in range(1, seq_len_max)] if not order else [2, 3, 5, 10]
+    # seq_lens = [2 ** pow for pow in range(1, seq_len_max)] if not order else [2, 3, 5, 10]
+    seq_lens = [8]
     for seq_len in seq_lens:
         if seq_len == 128:
             learn_iters += 100
@@ -200,7 +204,8 @@ def main(args):
         results = {}
         results["PC"] = PC_MSEs
         results["HN"] = HN_MSEs
-        json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{query_type}_data{args.data_type}_repeat{int(args.repeat*100)}percen.json", 'w'))
+        # json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{query_type}_data{args.data_type}_repeat{int(args.repeat*100)}percen.json", 'w'))
+        json.dump(results, open(num_path + f"/MSEs_seed{seed}_query{query_type}_data{args.data_type}_noise{int(args.noise*100)}.json", 'w'))
 
         # save ssim
         # ssims = {}
