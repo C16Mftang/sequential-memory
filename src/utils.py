@@ -81,20 +81,17 @@ def singlelayer_recall(model, seq, device, args):
     """recall function for pc
     
     seq: PxN sequence
-    mode: online or offline
-    binary: true or false
 
     output: (P-1)xN recall of sequence (starting from the second step)
     """
     seq_len, N = seq.shape
     recall = torch.zeros((seq_len, N)).to(device)
-    recall[0] = seq[0].clone().detach()
+    recall[0] = seq[0].clone().detach() + (torch.randn_like(seq[0]) * args.noise)
     if args.query == 'online':
         # recall using true image at each step
         recall[1:] = torch.sign(model(seq[:-1])) if args.data_type == 'binary' else model(seq[:-1])
     else:
         # recall using predictions from previous step
-        prev = seq[0].clone().detach() # 1xN
         for k in range(1, seq_len):
             recall[k] = torch.sign(model(recall[k-1:k])) if args.data_type == 'binary' else model(recall[k-1:k]) # 1xN
 
@@ -139,7 +136,7 @@ def hn_recall(model, seq, device, args):
     """
     seq_len, N = seq.shape
     recall = torch.zeros((seq_len, N)).to(device)
-    recall[0] = seq[0].clone().detach()
+    recall[0] = seq[0].clone().detach() + (torch.randn_like(seq[0]) * args.noise)
     if args.query == 'online':
         # recall using true image at each step
         recall[1:] = torch.sign(model(seq, seq[:-1])) if args.data_type == 'binary' else model(seq, seq[:-1]) # (P-1)xN
