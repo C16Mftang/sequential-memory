@@ -170,7 +170,7 @@ def _plot_recalls(recall, args):
     plt.savefig(fig_path + f'/{args.mode}_size{args.sample_size}_{args.query}_{args.dynamic}', dpi=150)
 
 def _plot_gt(memory, args):
-    n_seq = 1
+    n_seq = 5
     seq_len = memory.shape[1]
     memory = memory.reshape((-1, 784))
     fig, ax = plt.subplots(n_seq, seq_len, figsize=(seq_len, n_seq))
